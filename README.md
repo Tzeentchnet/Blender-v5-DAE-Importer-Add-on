@@ -5,7 +5,7 @@ A lightweight Blender 5 **extension** that restores support for importing `.dae`
 handles textures, polylist geometry, armatures, skin weights, and per-file
 up-axis correction.
 
-> **Upstream project:** <https://github.com/Tzeentchnet/Blender-v5-DAE-Importer-Add-on>
+> **Upstream project:** <https://github.com/RebeccaNod1/Blender-v5-DAE-Importer-Add-on>
 
 ## Credits
 
