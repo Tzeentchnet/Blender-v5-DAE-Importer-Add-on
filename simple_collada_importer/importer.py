@@ -10,6 +10,7 @@ import os
 import xml.etree.ElementTree as ET
 
 import bpy
+import bmesh
 import numpy as np
 from bpy_extras.io_utils import axis_conversion
 from mathutils import Matrix, Vector
@@ -547,6 +548,8 @@ def build_mesh_from_geometry(
     arm_obj, controllers, ctrl_mat_override, dae_filepath,
     armature_node_mat=None,
     source_cache=None,
+    use_default_material=False,
+    recalculate_normals=False,
 ):
     """Convert <geometry> -> Blender mesh (positions, normals, colors, UVs,
     materials, textures, optional skin weights linked to ``arm_obj``)."""
@@ -972,17 +975,27 @@ def build_mesh_from_geometry(
             os.path.splitext(os.path.basename(diff_path))[0] if diff_path else mat_id
         )
 
-        existing = bpy.data.materials.get(tex_base)
-        want_path = os.path.normpath(diff_path) if diff_path else None
-        if existing is not None and _mat_diffuse_path(existing) == want_path:
-            mat = existing
+        if use_default_material:
+            # Honor the "Use Blender Default Material" option: skip the DAE's
+            # diffuse/specular/texture data entirely and give each material
+            # Blender's stock Principled BSDF defaults (matches what you get
+            # by clicking "+ New" in the material panel). This avoids the
+            # splotchy chrome look that comes from low diffuse + high specular
+            # values in unauthored DAE materials.
+            mat = bpy.data.materials.new(mat_id or "Material")
+            mat.use_nodes = True
         else:
-            mat = bpy.data.materials.new(tex_base)
-            _build_mat_nodes(mat, dict(channels), has_second_uv)
-            print(
-                f"Material built: '{mat.name}' "
-                f"(diffuse={os.path.basename(diff_path) if diff_path else 'none'})"
-            )
+            existing = bpy.data.materials.get(tex_base)
+            want_path = os.path.normpath(diff_path) if diff_path else None
+            if existing is not None and _mat_diffuse_path(existing) == want_path:
+                mat = existing
+            else:
+                mat = bpy.data.materials.new(tex_base)
+                _build_mat_nodes(mat, dict(channels), has_second_uv)
+                print(
+                    f"Material built: '{mat.name}' "
+                    f"(diffuse={os.path.basename(diff_path) if diff_path else 'none'})"
+                )
 
         obj.data.materials.append(mat)
         mat_index_map[mat_id] = idx
@@ -1006,7 +1019,21 @@ def build_mesh_from_geometry(
         col_attr.data.foreach_set("color", col_flat)
 
     # ---------------------- NORMALS ----------------------
-    if corner_norms and len(corner_norms) == len(mesh.loops):
+    if recalculate_normals:
+        # User asked to ignore DAE-supplied normals/winding consistency and
+        # rebuild outward-facing normals. Use bmesh.ops.recalc_face_normals so
+        # neighboring faces agree on a consistent outside; this fixes the
+        # dark / flipped patches you get from DAEs with mixed face winding.
+        bm = bmesh.new()
+        bm.from_mesh(mesh)
+        bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+        bm.to_mesh(mesh)
+        bm.free()
+        mesh.polygons.foreach_set(
+            "use_smooth", np.ones(n_faces, dtype=bool)
+        )
+        mesh.update()
+    elif corner_norms and len(corner_norms) == len(mesh.loops):
         # Custom split normals only take effect on smooth-shaded polygons in
         # Blender 4.1+. New mesh polygons default to flat (use_smooth=False),
         # which causes the face normal to override the custom corner normals
@@ -1076,12 +1103,85 @@ def parse_node_transform(node, ns):
     return combined
 
 
+def split_object_by_material(context, obj):
+    """Split ``obj`` into one object per material slot.
+
+    Returns the list of resulting objects (length 1 if no split was needed).
+    Vertex groups, custom normals, UVs, the ``Armature`` modifier, and the
+    parent relationship are preserved on each new object by Blender's
+    ``mesh.separate`` operator.
+    """
+    if obj is None or obj.type != "MESH":
+        return [obj] if obj is not None else []
+
+    mesh = obj.data
+    used_indices = set()
+    if mesh.polygons:
+        mat_idx_arr = np.empty(len(mesh.polygons), dtype=np.int32)
+        mesh.polygons.foreach_get("material_index", mat_idx_arr)
+        used_indices = set(int(i) for i in np.unique(mat_idx_arr))
+
+    if len(used_indices) < 2:
+        return [obj]
+
+    base_name = obj.name
+
+    # Snapshot existing objects so we can identify what mesh.separate creates.
+    pre_existing = set(bpy.data.objects)
+
+    try:
+        with context.temp_override(
+            active_object=obj,
+            selected_objects=[obj],
+            selected_editable_objects=[obj],
+            object=obj,
+            edit_object=obj,
+        ):
+            bpy.ops.object.mode_set(mode="EDIT")
+            bpy.ops.mesh.separate(type="MATERIAL")
+            bpy.ops.object.mode_set(mode="OBJECT")
+    except Exception as e:
+        print(f"split_object_by_material: separate failed for '{base_name}': {e}")
+        # Best-effort: try to leave Blender in object mode.
+        try:
+            bpy.ops.object.mode_set(mode="OBJECT")
+        except Exception:
+            pass
+        return [obj]
+
+    new_objs = [o for o in bpy.data.objects if o not in pre_existing]
+    result = [obj] + new_objs
+
+    # Rename each piece after its single remaining material so the outliner
+    # shows meaningful names instead of `<base>`, `<base>.001`, ...
+    for piece in result:
+        if piece.type != "MESH" or not piece.data:
+            continue
+        # After material-based separation each piece should hold exactly one
+        # used material. Strip empty slots so we name from the live one.
+        used = [m for m in piece.data.materials if m is not None]
+        if not used:
+            continue
+        mat_name = used[0].name
+        new_name = f"{base_name}__{mat_name}"
+        # Avoid collisions; let Blender suffix .001 if needed.
+        piece.name = new_name
+        if piece.data is not None:
+            piece.data.name = new_name
+
+    return result
+
+
 def import_dae(
     filepath,
     context,
     import_rig=True,
     global_scale=1.0,
     forward_axis="-Y",
+    split_by_material=True,
+    use_default_material=False,
+    recalculate_normals=False,
+    target_collection=None,
     wm=None,
 ):
     """Import a single .dae file into the active collection.
@@ -1099,7 +1199,9 @@ def import_dae(
 
     ns = get_collada_ns(root)
 
-    if context.view_layer.active_layer_collection:
+    if target_collection is not None:
+        collection = target_collection
+    elif context.view_layer.active_layer_collection:
         collection = context.view_layer.active_layer_collection.collection
     else:
         collection = context.scene.collection
@@ -1149,9 +1251,13 @@ def import_dae(
                     arm_obj, controllers, mat_override, filepath,
                     armature_node_mat,
                     source_cache=source_cache,
+                    use_default_material=use_default_material,
+                    recalculate_normals=recalculate_normals,
                 )
                 if obj:
                     obj.matrix_world = world_mat
+                    if split_by_material:
+                        split_object_by_material(context, obj)
                     imported += 1
                     if wm is not None:
                         try:

@@ -27,6 +27,8 @@ over upstream_ below for the full list.
 
 ## Features
 
+- Supports both **COLLADA 1.4.1** and **COLLADA 1.5.0** schemas — namespace is
+  detected at parse time so files from any compliant exporter load correctly.
 - Imports COLLADA `.dae` geometry — `<triangles>` **and** `<polylist>` (auto fan-triangulated).
 - Builds Principled BSDF materials with diffuse, normal, AO, and specular channels.
 - Supports both **FCOLLADA** and **OpenCOLLADA3dsMax** normal-map conventions.
@@ -62,17 +64,34 @@ over upstream_ below for the full list.
 (and F9 redo panel) exposes:
 
 - **Import Rig** — skip armature/skin import for geometry-only loads.
+- **Split by Material** — split each imported geometry into one object per
+  material, so each piece appears separately in the Outliner. Off by default.
+- **Use Blender Default Material** — ignore the DAE's diffuse / specular
+  colors and texture references and assign each material Blender's stock
+  Principled BSDF defaults instead. Useful when a DAE has no usable materials
+  or its textures cannot be located, to avoid splotchy chrome-like viewport
+  shading. Off by default.
+- **Recalculate Normals (Outside)** — discard any per-corner normals from the
+  DAE and recompute consistent outward-facing normals after import (same as
+  Mesh → Normals → Recalculate Outside in edit mode). All polygons are also
+  marked smooth. Fixes DAE files with inconsistent face winding that show up
+  as dark / flipped patches on the model. On by default.
 - **Scale** — uniform scale applied to imported geometry and transforms
   (default `1.0`).
 - **Forward** — which DAE axis (after up-axis correction) maps to Blender's
   forward (`-Y`). Default `-Y` keeps existing behavior.
 
+The defaults for every option above are also configurable in
+**Edit → Preferences → Add-ons → Simple COLLADA (.dae) Importer**, so your
+preferred values are pre-selected in both the file dialog and drag-and-drop
+imports.
+
 ### Drag and drop
 
 Drag one or more `.dae` files from your OS file manager (Explorer, Finder,
 Nautilus, …) onto the **3D Viewport** or **Outliner**. The files are imported
-immediately. Use the **F9 redo panel** to adjust **Import Rig**, **Scale**, or
-**Forward** axis after the drop.
+immediately using the defaults set in the add-on preferences. Use the **F9
+redo panel** to adjust any option after the drop.
 
 ### Assign Textures by Name
 
@@ -135,6 +154,10 @@ blender --command extension validate simple_collada_importer-1.2.0.zip
   exported together in the same `.dae` file.
 - Normal maps on models with multiple UV channels may need to be connected
   manually in the shader editor.
+- Schema coverage: COLLADA 1.4.1 and 1.5.0. Only `<triangles>` and `<polylist>`
+  primitives are imported — `<polygons>`, `<lines>`, `<linestrips>`, `<tristrips>`,
+  `<trifans>`, and 1.5-only B-rep / NURBS / kinematics / physics elements are
+  ignored.
 
 ## License
 

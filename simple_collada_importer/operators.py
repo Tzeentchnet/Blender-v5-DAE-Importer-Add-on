@@ -15,6 +15,7 @@ from bpy.types import Operator, OperatorFileListElement
 from bpy_extras.io_utils import ImportHelper
 
 from .importer import import_dae
+from .preferences import get_prefs
 
 
 class IMPORT_OT_simple_collada_full(Operator, ImportHelper):
@@ -37,6 +38,37 @@ class IMPORT_OT_simple_collada_full(Operator, ImportHelper):
     import_rig: BoolProperty(
         name="Import Rig",
         description="Import armature and skin weights if present in the DAE file",
+        default=True,
+    )
+
+    split_by_material: BoolProperty(
+        name="Split by Material",
+        description=(
+            "Split each imported geometry into one object per material so each "
+            "piece appears separately in the Outliner"
+        ),
+        default=False,
+    )
+
+    use_default_material: BoolProperty(
+        name="Use Blender Default Material",
+        description=(
+            "Ignore the DAE's diffuse/specular colors and textures and assign "
+            "each material Blender's stock Principled BSDF defaults. Useful "
+            "when a DAE has no usable materials or textures, to avoid "
+            "splotchy chrome-like viewport shading"
+        ),
+        default=False,
+    )
+
+    recalculate_normals: BoolProperty(
+        name="Recalculate Normals (Outside)",
+        description=(
+            "Discard any per-corner normals from the DAE and recompute "
+            "consistent outward-facing normals after import. Fixes DAE files "
+            "with inconsistent face winding that show up as dark / flipped "
+            "patches on the model"
+        ),
         default=True,
     )
 
@@ -64,6 +96,23 @@ class IMPORT_OT_simple_collada_full(Operator, ImportHelper):
     )
 
     def invoke(self, context, event):
+        # Seed defaults from add-on preferences so the user's chosen defaults
+        # appear pre-selected in both the file dialog and drag-and-drop path.
+        prefs = get_prefs(context)
+        if prefs is not None:
+            if not self.properties.is_property_set("import_rig"):
+                self.import_rig = prefs.default_import_rig
+            if not self.properties.is_property_set("split_by_material"):
+                self.split_by_material = prefs.default_split_by_material
+            if not self.properties.is_property_set("use_default_material"):
+                self.use_default_material = prefs.default_use_default_material
+            if not self.properties.is_property_set("recalculate_normals"):
+                self.recalculate_normals = prefs.default_recalculate_normals
+            if not self.properties.is_property_set("global_scale"):
+                self.global_scale = prefs.default_global_scale
+            if not self.properties.is_property_set("forward_axis"):
+                self.forward_axis = prefs.default_forward_axis
+
         # Drag-and-drop populates `files`/`directory` directly; skip the dialog.
         if self.files:
             return self.execute(context)
@@ -87,17 +136,31 @@ class IMPORT_OT_simple_collada_full(Operator, ImportHelper):
         last_arm = None
         errors = []
 
+        # When importing more than one file, isolate each file's objects in
+        # its own collection so the Outliner shows them as distinct groups.
+        per_file_collections = len(paths) > 1
+        scene_collection = context.scene.collection
+
         wm = context.window_manager
         wm.progress_begin(0, max(len(paths), 1))
         try:
             for i, path in enumerate(paths):
                 wm.progress_update(i)
+                target_coll = None
+                if per_file_collections:
+                    coll_name = os.path.splitext(os.path.basename(path))[0]
+                    target_coll = bpy.data.collections.new(coll_name)
+                    scene_collection.children.link(target_coll)
                 count, arm_obj, err = import_dae(
                     path,
                     context,
                     import_rig=self.import_rig,
                     global_scale=self.global_scale,
                     forward_axis=self.forward_axis,
+                    split_by_material=self.split_by_material,
+                    use_default_material=self.use_default_material,
+                    recalculate_normals=self.recalculate_normals,
+                    target_collection=target_coll,
                     wm=wm,
                 )
                 if err:
@@ -105,6 +168,14 @@ class IMPORT_OT_simple_collada_full(Operator, ImportHelper):
                 total_imported += count
                 if arm_obj is not None:
                     last_arm = arm_obj
+                # Drop empty per-file collection if nothing was imported.
+                if (
+                    target_coll is not None
+                    and not target_coll.objects
+                    and not target_coll.children
+                ):
+                    scene_collection.children.unlink(target_coll)
+                    bpy.data.collections.remove(target_coll)
         finally:
             wm.progress_end()
 
@@ -126,6 +197,9 @@ class IMPORT_OT_simple_collada_full(Operator, ImportHelper):
     def draw(self, context):
         layout = self.layout
         layout.prop(self, "import_rig")
+        layout.prop(self, "split_by_material")
+        layout.prop(self, "use_default_material")
+        layout.prop(self, "recalculate_normals")
         layout.prop(self, "global_scale")
         layout.prop(self, "forward_axis")
 

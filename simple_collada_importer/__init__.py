@@ -9,9 +9,11 @@ from .operators import (
     OBJECT_OT_assign_textures_by_name,
 )
 from .file_handler import IO_FH_simple_collada
+from .preferences import SimpleColladaPreferences
 
 
 classes = (
+    SimpleColladaPreferences,
     IMPORT_OT_simple_collada_full,
     OBJECT_OT_assign_textures_by_name,
     IO_FH_simple_collada,
