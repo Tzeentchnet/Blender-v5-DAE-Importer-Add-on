@@ -161,7 +161,7 @@ class IMPORT_OT_simple_collada_full(Operator, ImportHelper):
                     use_default_material=self.use_default_material,
                     recalculate_normals=self.recalculate_normals,
                     target_collection=target_coll,
-                    wm=wm,
+                    wm=wm if len(paths) == 1 else None,
                 )
                 if err:
                     errors.append(f"{os.path.basename(path)}: {err}")
@@ -176,6 +176,7 @@ class IMPORT_OT_simple_collada_full(Operator, ImportHelper):
                 ):
                     scene_collection.children.unlink(target_coll)
                     bpy.data.collections.remove(target_coll)
+                wm.progress_update(i + 1)
         finally:
             wm.progress_end()
 

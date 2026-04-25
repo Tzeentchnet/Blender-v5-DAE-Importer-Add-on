@@ -1,5 +1,5 @@
 # Build script for the Simple COLLADA Importer extension.
-# Produces simple_collada_importer-<version>.zip in the repo root.
+# Produces simple_collada_importer-<version>.zip in the dist folder.
 
 $ErrorActionPreference = "Stop"
 

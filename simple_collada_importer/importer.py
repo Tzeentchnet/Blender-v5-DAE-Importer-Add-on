@@ -7,6 +7,7 @@ Performance: hot paths use NumPy for parsing float / int streams and
 
 import math
 import os
+import urllib.parse
 import xml.etree.ElementTree as ET
 
 import bpy
@@ -45,7 +46,7 @@ def _np_ints(text):
 
 
 def parse_source_float_array(source_elem, ns):
-    """Parse <source><float_array>; honor accessor stride.
+    """Parse <source><float_array>; honor accessor stride, offset and count.
 
     Returns an ``ndarray`` of shape ``(N, stride)`` (still indexable as
     ``arr[i]`` like the old list-of-tuples).
@@ -56,7 +57,13 @@ def parse_source_float_array(source_elem, ns):
     floats = _np_floats(float_array.text)
     accessor = source_elem.find(f"{q(ns, 'technique_common')}/{q(ns, 'accessor')}")
     stride = int(accessor.attrib.get("stride", "3")) if accessor is not None else 3
+    offset = int(accessor.attrib.get("offset", "0")) if accessor is not None else 0
+    count_attr = accessor.attrib.get("count") if accessor is not None else None
+    if offset:
+        floats = floats[offset:]
     n = (floats.size // stride) * stride
+    if count_attr is not None:
+        n = min(n, max(int(count_attr), 0) * stride)
     if n == 0:
         return np.empty((0, stride), dtype=np.float64)
     return floats[:n].reshape(-1, stride)
@@ -524,6 +531,21 @@ def parse_controllers(root, ns):
     return result
 
 
+def parse_instance_material_bindings(instance_elem, ns):
+    """Return ``symbol -> target material id`` for a scene instance."""
+    mat_map = {}
+    if instance_elem is None:
+        return mat_map
+    for inst_mat in instance_elem.findall(f".//{q(ns, 'instance_material')}"):
+        symbol = inst_mat.attrib.get("symbol", "")
+        target = inst_mat.attrib.get("target", "")
+        if target.startswith("#"):
+            target = target[1:]
+        if symbol and target:
+            mat_map[symbol] = target
+    return mat_map
+
+
 def build_ctrl_mat_map(root, ns, controllers):
     """Return ``geometry_id -> {material_symbol: material_target_id}``."""
     geom_to_mat_override = {}
@@ -532,11 +554,7 @@ def build_ctrl_mat_map(root, ns, controllers):
         if ctrl_url not in controllers:
             continue
         geom_id = controllers[ctrl_url]["skin_source"]
-        mat_map = {}
-        for im in ic.findall(f".//{q(ns, 'instance_material')}"):
-            symbol = im.attrib.get("symbol", "")
-            target = im.attrib.get("target", "")[1:]
-            mat_map[symbol] = target
+        mat_map = parse_instance_material_bindings(ic, ns)
         geom_to_mat_override[geom_id] = mat_map
     return geom_to_mat_override
 
@@ -547,6 +565,7 @@ def build_mesh_from_geometry(
     geom_elem, ns, collection, material_texture_map,
     arm_obj, controllers, ctrl_mat_override, dae_filepath,
     armature_node_mat=None,
+    controller_id=None,
     source_cache=None,
     use_default_material=False,
     recalculate_normals=False,
@@ -786,7 +805,9 @@ def build_mesh_from_geometry(
 
     # ---------------------- CREATE MESH (NumPy + foreach_set) ----------------------
     # Apply bind_shape_matrix to mesh-space positions
-    skin_ctrl = next((c for c in controllers.values() if c["skin_source"] == geom_id), None)
+    skin_ctrl = controllers.get(controller_id) if controller_id else None
+    if skin_ctrl is None and arm_obj is not None:
+        skin_ctrl = next((c for c in controllers.values() if c["skin_source"] == geom_id), None)
     pos_arr = np.asarray(positions, dtype=np.float64)  # (V, 3)
     if skin_ctrl is not None:
         bsm = skin_ctrl.get("bind_shape_matrix", Matrix.Identity(4))
@@ -830,12 +851,37 @@ def build_mesh_from_geometry(
     def _resolve_tex(raw_path):
         if not raw_path:
             return None
-        for candidate in [
-            raw_path,
-            os.path.join(dae_dir, raw_path),
-            os.path.join(dae_dir, os.path.basename(raw_path)),
-        ]:
-            candidate = os.path.normpath(candidate)
+        raw_path = str(raw_path).strip()
+        candidates = []
+
+        def add_candidate(path):
+            if path and path not in candidates:
+                candidates.append(path)
+
+        add_candidate(raw_path)
+        decoded = urllib.parse.unquote(raw_path)
+        add_candidate(decoded)
+
+        parsed = urllib.parse.urlparse(decoded)
+        if parsed.scheme.lower() == "file":
+            file_path = urllib.parse.unquote(parsed.path)
+            if os.name == "nt" and file_path.startswith("/") and len(file_path) > 2 and file_path[2] == ":":
+                file_path = file_path[1:]
+            if parsed.netloc and parsed.netloc.lower() != "localhost":
+                file_path = "//" + parsed.netloc + file_path
+            add_candidate(file_path)
+
+        for path in list(candidates):
+            if path.startswith("//") and not path.startswith("///"):
+                add_candidate(os.path.join(dae_dir, path[2:]))
+            if not os.path.isabs(path):
+                add_candidate(os.path.join(dae_dir, path))
+            basename = os.path.basename(path)
+            if basename:
+                add_candidate(os.path.join(dae_dir, basename))
+
+        for candidate in candidates:
+            candidate = os.path.normpath(os.path.expandvars(os.path.expanduser(candidate)))
             if os.path.isfile(candidate):
                 return candidate
         return None
@@ -860,7 +906,7 @@ def build_mesh_from_geometry(
                 return os.path.normpath(bpy.path.abspath(n.image.filepath))
         return None
 
-    def _build_mat_nodes(m, channels, has_second_uv=False):
+    def _build_mat_nodes(m, channels):
         m.use_nodes = True
         nodes = m.node_tree.nodes
         links = m.node_tree.links
@@ -919,11 +965,21 @@ def build_mesh_from_geometry(
                 img_n.location = (x - 300, -200)
                 img_n.image = img
                 img_n.label = "normal"
-                if has_second_uv:
-                    nrm_n = nodes.new("ShaderNodeNormalMap")
-                    nrm_n.location = (x, -200)
-                    links.new(img_n.outputs["Color"], nrm_n.inputs["Color"])
-                    links.new(nrm_n.outputs["Normal"], bsdf_n.inputs["Normal"])
+                nrm_n = nodes.new("ShaderNodeNormalMap")
+                nrm_n.location = (x, -200)
+                links.new(img_n.outputs["Color"], nrm_n.inputs["Color"])
+                links.new(nrm_n.outputs["Normal"], bsdf_n.inputs["Normal"])
+
+        alpha_path = channels.get("alpha")
+        if alpha_path:
+            img = _load_img(alpha_path, "Non-Color")
+            if img:
+                alpha_n = nodes.new("ShaderNodeTexImage")
+                alpha_n.location = (x - 300, 0)
+                alpha_n.image = img
+                alpha_n.label = "alpha"
+                links.new(alpha_n.outputs["Color"], bsdf_n.inputs["Alpha"])
+                m.blend_method = "BLEND"
 
         ao_path = channels.get("ao")
         if ao_path and diff_path:
@@ -958,12 +1014,6 @@ def build_mesh_from_geometry(
                 n.image = img
                 n.label = "specular"
 
-    has_second_uv = any(
-        inp.attrib.get("semantic") == "TEXCOORD" and inp.attrib.get("set", "0") == "1"
-        for prim in mesh_elem
-        for inp in prim.findall(q(ns, "input"))
-    )
-
     unique_mat_ids = sorted({m for m in face_mat_ids if m is not None})
     mat_index_map = {}
     obj.data.materials.clear()
@@ -991,7 +1041,7 @@ def build_mesh_from_geometry(
                 mat = existing
             else:
                 mat = bpy.data.materials.new(tex_base)
-                _build_mat_nodes(mat, dict(channels), has_second_uv)
+                _build_mat_nodes(mat, dict(channels))
                 print(
                     f"Material built: '{mat.name}' "
                     f"(diffuse={os.path.basename(diff_path) if diff_path else 'none'})"
@@ -1214,12 +1264,11 @@ def import_dae(
 
     arm_obj = None
     armature_node_mat = Matrix.Identity(4)
-    controllers = {}
+    controllers = parse_controllers(root, ns)
     if import_rig:
         arm_obj, armature_node_mat = build_armature(
             root, ns, collection, model_name, correction_mat
         )
-        controllers = parse_controllers(root, ns)
 
     geom_mat_override = build_ctrl_mat_map(root, ns, controllers)
 
@@ -1236,8 +1285,20 @@ def import_dae(
     geom_total = max(len(geom_map), 1)
     source_cache = {}
 
-    def walk_scene(node, parent_mat):
+    def _finish_imported_object(obj, world_mat):
         nonlocal imported
+        if obj is None:
+            return
+        obj.matrix_world = world_mat
+        pieces = split_object_by_material(context, obj) if split_by_material else [obj]
+        imported += len(pieces)
+        if wm is not None:
+            try:
+                wm.progress_update(imported / geom_total)
+            except Exception:
+                pass
+
+    def walk_scene(node, parent_mat):
         local_mat = parse_node_transform(node, ns)
         world_mat = parent_mat @ local_mat
 
@@ -1245,7 +1306,9 @@ def import_dae(
             geom_url = ig.attrib.get("url", "")[1:]
             if geom_url in geom_map:
                 geom = geom_map[geom_url]
-                mat_override = geom_mat_override.get(geom_url, {})
+                mat_override = parse_instance_material_bindings(ig, ns)
+                if not mat_override:
+                    mat_override = geom_mat_override.get(geom_url, {})
                 obj = build_mesh_from_geometry(
                     geom, ns, collection, material_texture_map,
                     arm_obj, controllers, mat_override, filepath,
@@ -1254,16 +1317,29 @@ def import_dae(
                     use_default_material=use_default_material,
                     recalculate_normals=recalculate_normals,
                 )
-                if obj:
-                    obj.matrix_world = world_mat
-                    if split_by_material:
-                        split_object_by_material(context, obj)
-                    imported += 1
-                    if wm is not None:
-                        try:
-                            wm.progress_update(imported / geom_total)
-                        except Exception:
-                            pass
+                _finish_imported_object(obj, world_mat)
+
+        for ic in node.findall(q(ns, "instance_controller")):
+            ctrl_url = ic.attrib.get("url", "")[1:]
+            controller = controllers.get(ctrl_url)
+            if controller is None:
+                continue
+            geom_url = controller.get("skin_source")
+            if geom_url in geom_map:
+                geom = geom_map[geom_url]
+                mat_override = parse_instance_material_bindings(ic, ns)
+                if not mat_override:
+                    mat_override = geom_mat_override.get(geom_url, {})
+                obj = build_mesh_from_geometry(
+                    geom, ns, collection, material_texture_map,
+                    arm_obj, controllers, mat_override, filepath,
+                    armature_node_mat,
+                    controller_id=ctrl_url,
+                    source_cache=source_cache,
+                    use_default_material=use_default_material,
+                    recalculate_normals=recalculate_normals,
+                )
+                _finish_imported_object(obj, world_mat)
 
         for child in node.findall(q(ns, "node")):
             walk_scene(child, world_mat)

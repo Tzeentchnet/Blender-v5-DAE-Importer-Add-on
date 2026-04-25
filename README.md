@@ -30,16 +30,21 @@ over upstream_ below for the full list.
 - Supports both **COLLADA 1.4.1** and **COLLADA 1.5.0** schemas — namespace is
   detected at parse time so files from any compliant exporter load correctly.
 - Imports COLLADA `.dae` geometry — `<triangles>` **and** `<polylist>` (auto fan-triangulated).
-- Builds Principled BSDF materials with diffuse, normal, AO, and specular channels.
+- Builds Principled BSDF materials with diffuse, normal, alpha/transparent, AO,
+  and specular channels.
+- Resolves scene-level material bindings, including the common case where a
+  primitive material symbol maps to a different COLLADA material id.
 - Supports both **FCOLLADA** and **OpenCOLLADA3dsMax** normal-map conventions.
+- Imports skinned meshes instanced through `<instance_controller>` as well as
+  direct `<instance_geometry>` nodes.
 - Heuristic "bad diffuse" correction — substitutes the `_alb` variant when an
   exporter wires an AO/normal/spec map into the diffuse channel.
 - Imports armatures from joint hierarchy + `INV_BIND_MATRIX` (toggleable).
 - Imports skin weights as vertex groups + `Armature` modifier.
 - Per-file `up_axis` correction (Y_UP / Z_UP / X_UP).
 - **Configurable global scale** and **forward-axis** remap on the import operator.
-- **Progress bar** in Blender's status bar — per-file and per-geometry updates so
-  large or batched imports show responsive feedback.
+- **Progress bar** in Blender's status bar — per-geometry updates for single
+  files and per-file updates for batched imports.
 - **Drag-and-drop** `.dae` files from your OS file manager into the 3D viewport.
 - **NumPy-accelerated** parsing and bulk mesh data transfer for fast imports of
   large meshes.
@@ -49,7 +54,7 @@ over upstream_ below for the full list.
 
 ### Blender 5.0+ (recommended — extensions panel)
 
-1. Download `simple_collada_importer-1.2.0.zip` (or build it from this repo —
+1. Download `simple_collada_importer-1.5.2.zip` (or build it from this repo —
    see _Building_ below).
 2. In Blender open **Edit → Preferences → Get Extensions → Install from Disk…**
 3. Select the `.zip` file.
@@ -129,31 +134,30 @@ These are documented for contributors; they are **not** implemented yet.
 ## Building from source
 
 The extension is a plain folder + `blender_manifest.toml`. To produce an
-installable zip from a checkout:
+installable zip in `dist/` from a checkout:
 
 ```powershell
 # PowerShell (Windows)
-Compress-Archive -Path simple_collada_importer\* `
-  -DestinationPath simple_collada_importer-1.2.0.zip -Force
+.\build.ps1
 ```
 
 ```bash
 # bash
-cd simple_collada_importer && zip -r ../simple_collada_importer-1.2.0.zip . && cd ..
+mkdir -p dist && cd simple_collada_importer && zip -r ../dist/simple_collada_importer-1.5.2.zip . && cd ..
 ```
 
 You can also use Blender's own validator:
 
 ```bash
-blender --command extension validate simple_collada_importer-1.2.0.zip
+blender --command extension validate dist/simple_collada_importer-1.5.2.zip
 ```
 
 ## Notes
 
 - Tested on Blender 5.0+. Skin weights require the mesh and armature to be
   exported together in the same `.dae` file.
-- Normal maps on models with multiple UV channels may need to be connected
-  manually in the shader editor.
+- Normal maps are connected automatically for the imported UV set. Models that
+  rely on additional UV channels may still need manual shader adjustment.
 - Schema coverage: COLLADA 1.4.1 and 1.5.0. Only `<triangles>` and `<polylist>`
   primitives are imported — `<polygons>`, `<lines>`, `<linestrips>`, `<tristrips>`,
   `<trifans>`, and 1.5-only B-rep / NURBS / kinematics / physics elements are
