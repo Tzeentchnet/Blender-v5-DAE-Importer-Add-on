@@ -22,8 +22,27 @@ if (-not (Test-Path $distDir)) {
 
 $zipName = "simple_collada_importer-$version.zip"
 $zipPath = Join-Path $distDir $zipName
+$stageRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("simple_collada-importer-" + [guid]::NewGuid())
+$stagePkg = Join-Path $stageRoot "simple_collada_importer"
 
 if (Test-Path $zipPath) { Remove-Item -Force $zipPath }
 
-Compress-Archive -Path (Join-Path $pkgDir "*") -DestinationPath $zipPath -Force
+try {
+    New-Item -ItemType Directory -Path $stageRoot | Out-Null
+    Copy-Item -LiteralPath $pkgDir -Destination $stagePkg -Recurse
+
+    Get-ChildItem -LiteralPath $stagePkg -Directory -Filter "__pycache__" -Recurse |
+        Remove-Item -Recurse -Force
+    Get-ChildItem -LiteralPath $stagePkg -File -Recurse |
+        Where-Object { $_.Extension -in ".pyc", ".pyo" -or $_.Name -eq ".DS_Store" } |
+        Remove-Item -Force
+
+    Compress-Archive -Path (Join-Path $stagePkg "*") -DestinationPath $zipPath -Force
+}
+finally {
+    if (Test-Path $stageRoot) {
+        Remove-Item -LiteralPath $stageRoot -Recurse -Force
+    }
+}
+
 Write-Host "Built dist/$zipName"

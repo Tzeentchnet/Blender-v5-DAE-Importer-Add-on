@@ -31,20 +31,28 @@ over upstream_ below for the full list.
   detected at parse time so files from any compliant exporter load correctly.
 - Imports COLLADA `.dae` geometry — `<triangles>` **and** `<polylist>` (auto fan-triangulated).
 - Builds Principled BSDF materials with diffuse, normal, alpha/transparent, AO,
-  and specular channels.
+  and specular channels. Specular maps connect to **Specular IOR Level** (or
+  Roughness when the filename looks like a roughness map). Diffuse texture
+  alpha remains disconnected unless a separate transparent/alpha map drives
+  transparency.
 - Resolves scene-level material bindings, including the common case where a
   primitive material symbol maps to a different COLLADA material id.
 - Supports both **FCOLLADA** and **OpenCOLLADA3dsMax** normal-map conventions.
 - Imports skinned meshes instanced through `<instance_controller>` as well as
   direct `<instance_geometry>` nodes.
+- Resolves skin joint names across node `id` / `name` / `sid` so bone names and
+  vertex groups stay matched when exporters use different identifiers.
+- Applies the same up-axis / scale / forward correction to armatures as to mesh
+  instances so Y_UP / X_UP rigs stay aligned with geometry.
 - Heuristic "bad diffuse" correction — substitutes the `_alb` variant when an
   exporter wires an AO/normal/spec map into the diffuse channel.
 - Imports armatures from joint hierarchy + `INV_BIND_MATRIX` (toggleable).
 - Imports skin weights as vertex groups + `Armature` modifier.
 - Per-file `up_axis` correction (Y_UP / Z_UP / X_UP).
 - **Configurable global scale** and **forward-axis** remap on the import operator.
-- **Progress bar** in Blender's status bar — per-geometry updates for single
-  files and per-file updates for batched imports.
+- **Progress bar** in Blender's status bar — per-instance updates for single
+  files and per-file updates for batched imports (clamped so material splits
+  cannot push the bar past complete).
 - **Drag-and-drop** `.dae` files from your OS file manager into the 3D viewport.
 - **NumPy-accelerated** parsing and bulk mesh data transfer for fast imports of
   large meshes.
@@ -54,7 +62,7 @@ over upstream_ below for the full list.
 
 ### Blender 5.0+ (recommended — extensions panel)
 
-1. Download `simple_collada_importer-1.5.2.zip` (or build it from this repo —
+1. Download `simple_collada_importer-1.5.3.zip` (or build it from this repo —
    see _Building_ below).
 2. In Blender open **Edit → Preferences → Get Extensions → Install from Disk…**
 3. Select the `.zip` file.
@@ -123,6 +131,34 @@ texture.
 On meshes with hundreds of thousands of corners these changes typically cut
 import time by an order of magnitude versus the upstream pure-Python path.
 
+## Changelog (selected)
+
+### 1.5.3
+
+Correctness and material fixes included in this release:
+
+- **Shared-offset primitive inputs** — VERTEX / NORMAL / UV inputs that share the
+  same COLLADA offset index are no longer overwritten; co-offset attributes
+  import correctly.
+- **Joint id / name / sid resolution** — skin `Name_array` entries resolve
+  against node `id`, `name`, and `sid`; bones and vertex groups use the same
+  final names so the Armature modifier can bind.
+- **Armature axis / scale correction** — armatures receive the same up-axis,
+  forward-axis, and scale correction matrix as mesh instances.
+- **Specular map wiring** — specular textures link into Principled BSDF
+  Specular IOR Level (or Roughness for roughness-named maps).
+- **Diffuse alpha behavior** — diffuse textures no longer force `CLIP` or
+  connect their alpha output; separate transparent/alpha maps still drive
+  transparency.
+- **Import progress** — single-file progress advances by processed scene
+  instances and is clamped so material splits cannot exceed complete.
+- **AO mix node** — prefers modern `ShaderNodeMix` (RGBA) with a MixRGB fallback.
+
+### 1.5.2
+
+- Scene material bindings, `instance_controller` import, normal/alpha maps,
+  `file://` texture paths, and accessor offset/count support.
+
 ## Suggested future improvements
 
 These are documented for contributors; they are **not** implemented yet.
@@ -130,6 +166,8 @@ These are documented for contributors; they are **not** implemented yet.
 - Use `xml.etree.ElementTree.iterparse` + `clear()` to reduce peak memory on
   very large `.dae` files.
 - Optional preservation of vertex order for round-trip workflows.
+- Multi-UV layer import when models rely on additional UV channels for normal
+  or light maps.
 
 ## Building from source
 
@@ -143,26 +181,39 @@ installable zip in `dist/` from a checkout:
 
 ```bash
 # bash
-mkdir -p dist && cd simple_collada_importer && zip -r ../dist/simple_collada_importer-1.5.2.zip . && cd ..
+mkdir -p dist && cd simple_collada_importer && zip -r ../dist/simple_collada_importer-1.5.3.zip . && cd ..
 ```
 
 You can also use Blender's own validator:
 
 ```bash
-blender --command extension validate dist/simple_collada_importer-1.5.2.zip
+blender --command extension validate dist/simple_collada_importer-1.5.3.zip
 ```
 
 ## Notes
 
 - Tested on Blender 5.0+. Skin weights require the mesh and armature to be
   exported together in the same `.dae` file.
+- Joint identifiers from the skin controller are matched to scene joints by
+  `id`, `name`, or `sid`. Bone and vertex-group names prefer the joint's
+  display `name` so the Armature modifier can bind even when exporters use
+  different identifier spaces.
+- Armatures inherit the same up-axis / scale / forward correction applied to
+  mesh instances. If a known-good Z_UP rig looks wrong after upgrade, please
+  report it with a sample file.
+- Specular maps connect to Principled **Specular IOR Level** by default. Maps
+  whose filenames contain roughness hints (`_roughness`, `_rgh`) connect to
+  **Roughness** instead. This is a simple COLLADA→Principled mapping, not a
+  full PBR conversion.
+- Diffuse texture alpha remains disconnected by default. Separate
+  transparent/alpha maps set blend to BLEND; solid color materials with
+  alpha < 1 also use BLEND.
 - Normal maps are connected automatically for the imported UV set. Models that
   rely on additional UV channels may still need manual shader adjustment.
 - Schema coverage: COLLADA 1.4.1 and 1.5.0. Only `<triangles>` and `<polylist>`
   primitives are imported — `<polygons>`, `<lines>`, `<linestrips>`, `<tristrips>`,
   `<trifans>`, and 1.5-only B-rep / NURBS / kinematics / physics elements are
   ignored.
-
 ## License
 
 GPL-3.0-or-later — matches Blender's add-on licensing requirements. See

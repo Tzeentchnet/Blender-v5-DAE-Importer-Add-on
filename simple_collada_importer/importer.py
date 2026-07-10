@@ -110,6 +110,17 @@ def build_correction_matrix(root, ns, global_scale=1.0, forward_axis="-Y"):
     return scale_mat @ forward_correction @ up_correction
 
 
+def _instance_controller_key(instance_elem, ns):
+    """Return ``(controller_id, skeleton_refs)`` for an instance controller."""
+    controller_id = instance_elem.attrib.get("url", "").lstrip("#")
+    skeleton_refs = tuple(
+        skeleton.text.strip().lstrip("#")
+        for skeleton in instance_elem.findall(q(ns, "skeleton"))
+        if skeleton.text and skeleton.text.strip()
+    )
+    return controller_id, skeleton_refs
+
+
 # ---------------------- MATERIAL / TEXTURE EXTRACTION ----------------------
 
 def extract_material_texture_map(root, ns):
@@ -288,30 +299,28 @@ def extract_material_texture_map(root, ns):
 def build_armature(root, ns, collection, model_name="Armature", correction_mat=None):
     """Build a Blender armature from joint hierarchy + INV_BIND matrices.
 
-    Returns ``(armature_object, bsm_per_geom_dict)`` or ``(None, {})``.
+    Controller joint names are resolved by node ``id``, ``sid``, or ``name``.
+    Resolution is scoped to each instance's optional ``<skeleton>`` roots, and
+    the returned maps use Blender's final unique bone names.
+
+    Returns ``(armature_object, joint_name_maps)`` or ``(None, {})``. The maps
+    are keyed by ``(controller_id, skeleton_refs)`` and map raw controller
+    joint strings to the matching Blender bone / vertex-group name.
     """
     vs = root.find(f".//{q(ns, 'visual_scene')}")
     if vs is None:
         return None, {}
 
-    joint_bind_world = {}
-    joint_bsm = {}
+    # controller id -> raw controller joint string -> bind-space world matrix
+    controller_bind_world = {}
 
     ctrl_lib = root.find(f".//{q(ns, 'library_controllers')}")
     if ctrl_lib is not None:
         for ctrl in ctrl_lib.findall(q(ns, "controller")):
+            controller_id = ctrl.attrib.get("id", "")
             skin = ctrl.find(q(ns, "skin"))
-            if skin is None:
+            if skin is None or not controller_id:
                 continue
-            geom_id = skin.attrib.get("source", "")[1:]
-
-            bsm_elem = skin.find(q(ns, "bind_shape_matrix"))
-            bsm = (
-                parse_matrix(bsm_elem.text)
-                if (bsm_elem is not None and bsm_elem.text)
-                else Matrix.Identity(4)
-            )
-            joint_bsm[geom_id] = bsm
 
             joints_elem = skin.find(q(ns, "joints"))
             if joints_elem is None:
@@ -338,56 +347,198 @@ def build_armature(root, ns, collection, model_name="Armature", correction_mat=N
             jnames = sources.get(jnames_src, [])
             ibm_floats = sources.get(ibm_src, np.empty(0))
             ibm_floats = np.asarray(ibm_floats, dtype=np.float64)
+            bindings = {}
             for i, jname in enumerate(jnames):
-                if jname in joint_bind_world:
+                if jname in bindings:
                     continue
                 start = i * 16
                 if start + 16 > ibm_floats.size:
                     continue
                 inv_bind = Matrix(ibm_floats[start:start + 16].reshape(4, 4).tolist())
                 try:
-                    joint_bind_world[jname] = inv_bind.inverted()
+                    bindings[jname] = inv_bind.inverted()
                 except Exception:
-                    joint_bind_world[jname] = Matrix.Identity(4)
+                    bindings[jname] = Matrix.Identity(4)
+            if bindings:
+                controller_bind_world[controller_id] = bindings
 
-    if not joint_bind_world:
+    if not controller_bind_world:
         return None, {}
 
+    # Keep every scene node so <skeleton> may refer to a non-JOINT wrapper.
+    scene_nodes = {}
+    scene_children = {}
     bone_info = {}
+    node_serial = 0
 
-    def walk_joints(node, parent_id):
+    def walk_joints(node, parent_node_key, parent_joint_key):
+        nonlocal node_serial
+        node_serial += 1
         node_id = node.attrib.get("id", "")
-        node_name = node.attrib.get("name", node_id)
+        node_sid = node.attrib.get("sid", "") or ""
+        node_name = node.attrib.get("name", "") or node_id or node_sid
         node_type = node.attrib.get("type", "")
-        if node_type == "JOINT" and node_id:
-            bone_info[node_id] = {"name": node_name, "parent_id": parent_id}
-            for child in node.findall(q(ns, "node")):
-                walk_joints(child, node_id)
-        else:
-            for child in node.findall(q(ns, "node")):
-                walk_joints(child, parent_id)
+        base_key = node_id or node_sid or node_name or f"__node_{node_serial}"
+        node_key = base_key
+        suffix = 2
+        while node_key in scene_nodes:
+            node_key = f"{base_key}::{suffix}"
+            suffix += 1
+
+        scene_nodes[node_key] = {
+            "id": node_id,
+            "name": node_name,
+            "sid": node_sid,
+            "parent_node_key": parent_node_key,
+        }
+        if parent_node_key is not None:
+            scene_children.setdefault(parent_node_key, []).append(node_key)
+
+        next_parent_joint = parent_joint_key
+        if node_type == "JOINT":
+            bone_info[node_key] = {
+                "id": node_id,
+                "name": node_name or node_id or node_sid or "Joint",
+                "sid": node_sid,
+                "parent_id": parent_joint_key,
+            }
+            next_parent_joint = node_key
+
+        for child in node.findall(q(ns, "node")):
+            walk_joints(child, node_key, next_parent_joint)
 
     for node in vs.findall(q(ns, "node")):
-        walk_joints(node, None)
+        walk_joints(node, None, None)
+
+    contexts_by_controller = {
+        controller_id: set() for controller_id in controller_bind_world
+    }
+    for instance in vs.findall(f".//{q(ns, 'instance_controller')}"):
+        controller_id, skeleton_refs = _instance_controller_key(instance, ns)
+        if controller_id in contexts_by_controller:
+            contexts_by_controller[controller_id].add(skeleton_refs)
+    for controller_id, contexts in contexts_by_controller.items():
+        if not contexts:
+            contexts.add(())
+
+    def find_unique(records, raw_name, allowed_keys=None):
+        keys = allowed_keys if allowed_keys is not None else records.keys()
+        for field in ("id", "sid", "name"):
+            matches = [
+                key for key in keys
+                if key in records and records[key].get(field) == raw_name
+            ]
+            if len(matches) == 1:
+                return matches[0]
+            if len(matches) > 1:
+                return None
+        return None
+
+    def joints_below_skeletons(skeleton_refs):
+        if not skeleton_refs:
+            return set(bone_info)
+        root_keys = []
+        for skeleton_ref in skeleton_refs:
+            root_key = find_unique(scene_nodes, skeleton_ref)
+            if root_key is not None:
+                root_keys.append(root_key)
+        allowed = set()
+        pending = list(root_keys)
+        while pending:
+            node_key = pending.pop()
+            if node_key in allowed:
+                continue
+            if node_key in bone_info:
+                allowed.add(node_key)
+            pending.extend(scene_children.get(node_key, ()))
+        return allowed
+
+    def matrices_close(left, right, tolerance=1e-6):
+        return all(
+            abs(left[row][column] - right[row][column]) <= tolerance
+            for row in range(4)
+            for column in range(4)
+        )
+
+    # Joint key -> bind matrix. Context maps retain controller ownership.
+    joint_bind_world = {}
+    context_joint_keys = {}
+    unresolved = []
+
+    for controller_id, bindings in controller_bind_world.items():
+        for skeleton_refs in sorted(contexts_by_controller[controller_id]):
+            context_key = (controller_id, skeleton_refs)
+            allowed_keys = joints_below_skeletons(skeleton_refs)
+            raw_to_joint_key = {}
+            for raw_name, world in bindings.items():
+                joint_key = find_unique(bone_info, raw_name, allowed_keys)
+                if joint_key is None:
+                    unresolved.append(f"{controller_id}:{raw_name}")
+                    base_key = f"__controller_joint__{controller_id}::{raw_name}"
+                    joint_key = base_key
+                    suffix = 2
+                    while joint_key in bone_info:
+                        joint_key = f"{base_key}::{suffix}"
+                        suffix += 1
+                    bone_info[joint_key] = {
+                        "id": raw_name,
+                        "name": raw_name,
+                        "sid": "",
+                        "parent_id": None,
+                    }
+                elif (
+                    joint_key in joint_bind_world
+                    and not matrices_close(joint_bind_world[joint_key], world)
+                ):
+                    # One Blender bone cannot represent conflicting bind poses.
+                    source_info = bone_info[joint_key]
+                    base_key = f"{joint_key}::{controller_id}"
+                    duplicate_key = base_key
+                    suffix = 2
+                    while duplicate_key in bone_info:
+                        duplicate_key = f"{base_key}::{suffix}"
+                        suffix += 1
+                    bone_info[duplicate_key] = dict(source_info)
+                    joint_key = duplicate_key
+
+                joint_bind_world[joint_key] = world
+                raw_to_joint_key[raw_name] = joint_key
+            context_joint_keys[context_key] = raw_to_joint_key
+
+    if unresolved:
+        print(
+            f"Armature '{model_name}': {len(unresolved)} joint name(s) not "
+            f"uniquely matched to scoped scene JOINT nodes (using raw names): "
+            f"{', '.join(unresolved[:8])}"
+            + ("..." if len(unresolved) > 8 else "")
+        )
 
     arm_data = bpy.data.armatures.new(model_name)
     arm_data.display_type = "OCTAHEDRAL"
     arm_obj = bpy.data.objects.new(model_name, arm_data)
     collection.objects.link(arm_obj)
 
+    # Apply the same up-axis / scale / forward correction used for mesh roots
+    # so bind-pose bones land in the same space as imported geometry.
+    if correction_mat is not None:
+        arm_obj.matrix_world = correction_mat.copy()
+
     bpy.context.view_layer.objects.active = arm_obj
     bpy.ops.object.mode_set(mode="EDIT")
 
     edit_bones = arm_data.edit_bones
     created = {}
+    actual_name_by_key = {}
 
     for bid, info in bone_info.items():
         if bid not in joint_bind_world:
             continue
         world = joint_bind_world[bid]
         head_world = world.to_translation()
+        bone_name = info["name"] or info["id"]
 
-        eb = edit_bones.new(info["name"])
+        eb = edit_bones.new(bone_name)
+        actual_name_by_key[bid] = eb.name
         eb.head = head_world
 
         children_with_pos = [
@@ -422,8 +573,16 @@ def build_armature(root, ns, collection, model_name="Armature", correction_mat=N
             created[bid].parent = created[pid]
 
     bpy.ops.object.mode_set(mode="OBJECT")
+    joint_name_maps = {
+        context_key: {
+            raw_name: actual_name_by_key[joint_key]
+            for raw_name, joint_key in raw_to_joint_key.items()
+            if joint_key in actual_name_by_key
+        }
+        for context_key, raw_to_joint_key in context_joint_keys.items()
+    }
     print(f"Armature '{model_name}' created with {len(created)} bones.")
-    return arm_obj, joint_bsm
+    return arm_obj, joint_name_maps
 
 
 # ---------------------- SKIN WEIGHT PARSER ----------------------
@@ -564,14 +723,19 @@ def build_ctrl_mat_map(root, ns, controllers):
 def build_mesh_from_geometry(
     geom_elem, ns, collection, material_texture_map,
     arm_obj, controllers, ctrl_mat_override, dae_filepath,
-    armature_node_mat=None,
+    joint_name_map=None,
     controller_id=None,
     source_cache=None,
+    material_cache=None,
     use_default_material=False,
     recalculate_normals=False,
 ):
     """Convert <geometry> -> Blender mesh (positions, normals, colors, UVs,
-    materials, textures, optional skin weights linked to ``arm_obj``)."""
+    materials, textures, optional skin weights linked to ``arm_obj``).
+
+    ``joint_name_map`` maps raw controller joint strings to the bone /
+    vertex-group names created by ``build_armature``.
+    """
     mesh_elem = geom_elem.find(q(ns, "mesh"))
     if mesh_elem is None:
         print("Skipping geometry (no <mesh>):", geom_elem.attrib.get("id"))
@@ -582,6 +746,8 @@ def build_mesh_from_geometry(
 
     if source_cache is None:
         source_cache = {}
+    if material_cache is None:
+        material_cache = {}
 
     sources = {}
     for src in mesh_elem.findall(q(ns, "source")):
@@ -625,7 +791,10 @@ def build_mesh_from_geometry(
         tri_mat_symbol = prim.attrib.get("material")
         tri_mat_id = ctrl_mat_override.get(tri_mat_symbol, tri_mat_symbol)
 
-        input_by_offset = {}
+        # COLLADA allows multiple <input> elements to share the same offset
+        # index (e.g. VERTEX and NORMAL both at offset 0). Keep a list per
+        # offset so co-offset semantics are not overwritten.
+        inputs_by_offset = {}
         max_offset = 0
         for inp in prim.findall(q(ns, "input")):
             sem = inp.attrib.get("semantic")
@@ -633,14 +802,19 @@ def build_mesh_from_geometry(
             src = src_val[1:] if src_val.startswith("#") else src_val
             off = int(inp.attrib.get("offset", "0"))
             set_i = inp.attrib.get("set")
-            input_by_offset[off] = (sem, src, set_i)
+            inputs_by_offset.setdefault(off, []).append((sem, src, set_i))
             max_offset = max(max_offset, off)
 
         num_inputs = max_offset + 1
 
+        def _iter_inputs():
+            for off, entries in inputs_by_offset.items():
+                for sem, src, set_i in entries:
+                    yield off, sem, src, set_i
+
         vertex_offset = 0
         pos_source_id = None
-        for off, (sem, src, _) in input_by_offset.items():
+        for off, sem, src, _ in _iter_inputs():
             if sem == "VERTEX":
                 vertex_offset = off
                 pos_source_id = vertices_map.get(src)
@@ -648,7 +822,7 @@ def build_mesh_from_geometry(
                     break
 
         if pos_source_id is None:
-            for off, (sem, src, _) in input_by_offset.items():
+            for off, sem, src, _ in _iter_inputs():
                 if sem == "POSITION":
                     vertex_offset = off
                     pos_source_id = src
@@ -658,23 +832,23 @@ def build_mesh_from_geometry(
             for src_id in sources.keys():
                 if "position" in src_id.lower():
                     pos_source_id = src_id
-                    for off, (_s_sem, s_src, _) in input_by_offset.items():
+                    for off, _sem, s_src, _ in _iter_inputs():
                         if s_src == pos_source_id:
                             vertex_offset = off
                             break
                     break
 
         if pos_source_id is None:
-            print(f"DEBUG: Failed to find POSITION for {geom_name}")
             for sid in sources.keys():
                 if "pos" in sid.lower():
                     pos_source_id = sid
-                    for off, (_s_sem, s_src, _) in input_by_offset.items():
+                    for off, _sem, s_src, _ in _iter_inputs():
                         if s_src == pos_source_id:
                             vertex_offset = off
                             break
                     break
             if pos_source_id is None:
+                print(f"Failed to find POSITION for {geom_name}")
                 return None
 
         positions = sources.get(pos_source_id)
@@ -684,7 +858,7 @@ def build_mesh_from_geometry(
 
         normal_offset = uv_offset = color_offset = None
         normal_source = uv_source = color_source = None
-        for off, (sem, src, set_idx) in input_by_offset.items():
+        for off, sem, src, set_idx in _iter_inputs():
             if sem == "NORMAL":
                 normal_offset = off
                 normal_source = sources.get(src)
@@ -898,14 +1072,6 @@ def build_mesh_from_geometry(
             print(f"Failed to load texture '{resolved}': {e}")
             return None
 
-    def _mat_diffuse_path(m):
-        if not m.use_nodes:
-            return None
-        for n in m.node_tree.nodes:
-            if n.type == "TEX_IMAGE" and n.image and n.label == "diffuse":
-                return os.path.normpath(bpy.path.abspath(n.image.filepath))
-        return None
-
     def _build_mat_nodes(m, channels):
         m.use_nodes = True
         nodes = m.node_tree.nodes
@@ -942,8 +1108,8 @@ def build_mesh_from_geometry(
                 n.label = "diffuse"
                 n.location = (x, 200)
                 links.new(n.outputs["Color"], bsdf_n.inputs["Base Color"])
-                links.new(n.outputs["Alpha"], bsdf_n.inputs["Alpha"])
-                m.blend_method = "CLIP"
+                # Leave diffuse alpha disconnected. Explicit transparent /
+                # alpha maps below own BSDF Alpha and blend behavior.
         else:
             # No diffuse texture: fall back to <diffuse><color> if present,
             # otherwise a neutral mid-gray so the surface isn't rendered as
@@ -987,23 +1153,41 @@ def build_mesh_from_geometry(
             if img:
                 ao_n = nodes.new("ShaderNodeTexImage")
                 ao_n.location = (x - 300, 450)
-                mix_n = nodes.new("ShaderNodeMixRGB")
-                mix_n.location = (x, 450)
                 ao_n.image = img
                 ao_n.label = "ao"
-                mix_n.blend_type = "MULTIPLY"
-                mix_n.inputs[0].default_value = 1.0
+                mix_n = None
+                mix_a = mix_b = mix_out = mix_fac = None
+                # Prefer modern ShaderNodeMix (Blender 3.4+); fall back to MixRGB.
+                try:
+                    mix_n = nodes.new("ShaderNodeMix")
+                    mix_n.data_type = "RGBA"
+                    mix_n.blend_type = "MULTIPLY"
+                    mix_n.location = (x, 450)
+                    mix_fac = mix_n.inputs.get("Factor") or mix_n.inputs[0]
+                    mix_a = mix_n.inputs.get("A") or mix_n.inputs[6]
+                    mix_b = mix_n.inputs.get("B") or mix_n.inputs[7]
+                    mix_out = mix_n.outputs.get("Result") or mix_n.outputs[2]
+                except Exception:
+                    mix_n = nodes.new("ShaderNodeMixRGB")
+                    mix_n.blend_type = "MULTIPLY"
+                    mix_n.location = (x, 450)
+                    mix_fac = mix_n.inputs[0]
+                    mix_a = mix_n.inputs[1]
+                    mix_b = mix_n.inputs[2]
+                    mix_out = mix_n.outputs["Color"]
+                if mix_fac is not None:
+                    mix_fac.default_value = 1.0
                 diff_node = next(
                     (n for n in nodes if n.type == "TEX_IMAGE" and n.label == "diffuse"),
                     None,
                 )
-                if diff_node:
-                    links.new(diff_node.outputs["Color"], mix_n.inputs[1])
-                    links.new(ao_n.outputs["Color"], mix_n.inputs[2])
+                if diff_node and mix_a is not None and mix_b is not None and mix_out is not None:
+                    links.new(diff_node.outputs["Color"], mix_a)
+                    links.new(ao_n.outputs["Color"], mix_b)
                     for lnk in list(links):
                         if lnk.to_socket == bsdf_n.inputs["Base Color"]:
                             links.remove(lnk)
-                    links.new(mix_n.outputs["Color"], bsdf_n.inputs["Base Color"])
+                    links.new(mix_out, bsdf_n.inputs["Base Color"])
 
         spec_path = channels.get("specular")
         if spec_path:
@@ -1013,6 +1197,17 @@ def build_mesh_from_geometry(
                 n.location = (x, -450)
                 n.image = img
                 n.label = "specular"
+                base = os.path.basename(str(spec_path)).lower()
+                # Filename heuristics already used at extract time may place
+                # roughness maps in the specular channel — route those to Roughness.
+                if any(h in base for h in ("_roughness", "_rgh", "roughness")):
+                    if "Roughness" in bsdf_n.inputs:
+                        links.new(n.outputs["Color"], bsdf_n.inputs["Roughness"])
+                else:
+                    for inp_name in ("Specular IOR Level", "Specular"):
+                        if inp_name in bsdf_n.inputs:
+                            links.new(n.outputs["Color"], bsdf_n.inputs[inp_name])
+                            break
 
     unique_mat_ids = sorted({m for m in face_mat_ids if m is not None})
     mat_index_map = {}
@@ -1025,27 +1220,25 @@ def build_mesh_from_geometry(
             os.path.splitext(os.path.basename(diff_path))[0] if diff_path else mat_id
         )
 
-        if use_default_material:
-            # Honor the "Use Blender Default Material" option: skip the DAE's
-            # diffuse/specular/texture data entirely and give each material
-            # Blender's stock Principled BSDF defaults (matches what you get
-            # by clicking "+ New" in the material panel). This avoids the
-            # splotchy chrome look that comes from low diffuse + high specular
-            # values in unauthored DAE materials.
-            mat = bpy.data.materials.new(mat_id or "Material")
-            mat.use_nodes = True
-        else:
-            existing = bpy.data.materials.get(tex_base)
-            want_path = os.path.normpath(diff_path) if diff_path else None
-            if existing is not None and _mat_diffuse_path(existing) == want_path:
-                mat = existing
+        # COLLADA material IDs are document-unique. Reuse only within this
+        # import so materials that share a diffuse image but differ in alpha,
+        # AO, specular, roughness, or color never collapse into one node graph.
+        cache_key = (bool(use_default_material), mat_id)
+        mat = material_cache.get(cache_key)
+        if mat is None:
+            if use_default_material:
+                # Honor the "Use Blender Default Material" option: skip the
+                # DAE's colors and texture data entirely.
+                mat = bpy.data.materials.new(mat_id or "Material")
+                mat.use_nodes = True
             else:
-                mat = bpy.data.materials.new(tex_base)
+                mat = bpy.data.materials.new(tex_base or mat_id or "Material")
                 _build_mat_nodes(mat, dict(channels))
                 print(
                     f"Material built: '{mat.name}' "
                     f"(diffuse={os.path.basename(diff_path) if diff_path else 'none'})"
                 )
+            material_cache[cache_key] = mat
 
         obj.data.materials.append(mat)
         mat_index_map[mat_id] = idx
@@ -1098,8 +1291,18 @@ def build_mesh_from_geometry(
     if arm_obj is not None and skin_ctrl is not None:
         joint_names = skin_ctrl["joint_names"]
         vertex_weights = skin_ctrl["vertex_weights"]
+        name_map = joint_name_map or {}
 
-        vgroups = {jname: obj.vertex_groups.new(name=jname) for jname in joint_names}
+        # Resolve each controller joint string to the bone name created on the
+        # armature so Armature-modifier binding works when id/name/sid differ.
+        resolved_names = []
+        for jname in joint_names:
+            resolved_names.append(name_map.get(jname, jname))
+
+        vgroups = {}
+        for bone_name in resolved_names:
+            if bone_name not in vgroups:
+                vgroups[bone_name] = obj.vertex_groups.new(name=bone_name)
 
         # Group (vert, weight) by bone index so we can issue one bulk add per bone.
         # Also sums duplicate joint refs per vertex (matches DAE intent better than per-pair ADD).
@@ -1107,15 +1310,15 @@ def build_mesh_from_geometry(
         for vert_idx, pairs in vertex_weights.items():
             summed = {}
             for j_idx, weight in pairs:
-                if j_idx < 0 or j_idx >= len(joint_names) or weight <= 0.0:
+                if j_idx < 0 or j_idx >= len(resolved_names) or weight <= 0.0:
                     continue
                 summed[j_idx] = summed.get(j_idx, 0.0) + weight
             for j_idx, weight in summed.items():
                 per_bone_vert_weight.setdefault(j_idx, {}).setdefault(weight, []).append(vert_idx)
 
         for j_idx, weight_buckets in per_bone_vert_weight.items():
-            jname = joint_names[j_idx]
-            vg = vgroups[jname]
+            bone_name = resolved_names[j_idx]
+            vg = vgroups[bone_name]
             for weight, vert_list in weight_buckets.items():
                 vg.add(vert_list, float(weight), "REPLACE")
 
@@ -1263,10 +1466,10 @@ def import_dae(
     )
 
     arm_obj = None
-    armature_node_mat = Matrix.Identity(4)
+    joint_name_maps = {}
     controllers = parse_controllers(root, ns)
     if import_rig:
-        arm_obj, armature_node_mat = build_armature(
+        arm_obj, joint_name_maps = build_armature(
             root, ns, collection, model_name, correction_mat
         )
 
@@ -1282,19 +1485,50 @@ def import_dae(
 
     geom_map = {g.attrib.get("id"): g for g in geometries}
     imported = 0
-    geom_total = max(len(geom_map), 1)
     source_cache = {}
+    material_cache = {}
+
+    def _count_importable_instances(node):
+        count = sum(
+            1
+            for instance in node.findall(q(ns, "instance_geometry"))
+            if instance.attrib.get("url", "").lstrip("#") in geom_map
+        )
+        for instance in node.findall(q(ns, "instance_controller")):
+            controller_id = instance.attrib.get("url", "").lstrip("#")
+            controller = controllers.get(controller_id)
+            if controller and controller.get("skin_source") in geom_map:
+                count += 1
+        return count + sum(
+            _count_importable_instances(child)
+            for child in node.findall(q(ns, "node"))
+        )
+
+    instance_total = max(
+        sum(_count_importable_instances(node) for node in vs.findall(q(ns, "node"))),
+        1,
+    )
+    instances_done = 0
+
+    def _joint_map_for(controller_id, skeleton_refs=()):
+        exact = joint_name_maps.get((controller_id, skeleton_refs))
+        if exact is not None:
+            return exact
+        for (candidate_id, _candidate_refs), name_map in joint_name_maps.items():
+            if candidate_id == controller_id:
+                return name_map
+        return {}
 
     def _finish_imported_object(obj, world_mat):
-        nonlocal imported
-        if obj is None:
-            return
-        obj.matrix_world = world_mat
-        pieces = split_object_by_material(context, obj) if split_by_material else [obj]
-        imported += len(pieces)
+        nonlocal imported, instances_done
+        instances_done += 1
+        if obj is not None:
+            obj.matrix_world = world_mat
+            pieces = split_object_by_material(context, obj) if split_by_material else [obj]
+            imported += len(pieces)
         if wm is not None:
             try:
-                wm.progress_update(imported / geom_total)
+                wm.progress_update(min(instances_done / instance_total, 1.0))
             except Exception:
                 pass
 
@@ -1306,21 +1540,31 @@ def import_dae(
             geom_url = ig.attrib.get("url", "")[1:]
             if geom_url in geom_map:
                 geom = geom_map[geom_url]
+                direct_controller_id = next(
+                    (
+                        controller_id
+                        for controller_id, controller in controllers.items()
+                        if controller.get("skin_source") == geom_url
+                    ),
+                    None,
+                ) if arm_obj is not None else None
                 mat_override = parse_instance_material_bindings(ig, ns)
                 if not mat_override:
                     mat_override = geom_mat_override.get(geom_url, {})
                 obj = build_mesh_from_geometry(
                     geom, ns, collection, material_texture_map,
                     arm_obj, controllers, mat_override, filepath,
-                    armature_node_mat,
+                    joint_name_map=_joint_map_for(direct_controller_id),
+                    controller_id=direct_controller_id,
                     source_cache=source_cache,
+                    material_cache=material_cache,
                     use_default_material=use_default_material,
                     recalculate_normals=recalculate_normals,
                 )
                 _finish_imported_object(obj, world_mat)
 
         for ic in node.findall(q(ns, "instance_controller")):
-            ctrl_url = ic.attrib.get("url", "")[1:]
+            ctrl_url, skeleton_refs = _instance_controller_key(ic, ns)
             controller = controllers.get(ctrl_url)
             if controller is None:
                 continue
@@ -1333,9 +1577,10 @@ def import_dae(
                 obj = build_mesh_from_geometry(
                     geom, ns, collection, material_texture_map,
                     arm_obj, controllers, mat_override, filepath,
-                    armature_node_mat,
+                    joint_name_map=_joint_map_for(ctrl_url, skeleton_refs),
                     controller_id=ctrl_url,
                     source_cache=source_cache,
+                    material_cache=material_cache,
                     use_default_material=use_default_material,
                     recalculate_normals=recalculate_normals,
                 )
