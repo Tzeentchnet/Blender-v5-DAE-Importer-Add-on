@@ -40,6 +40,8 @@ class ImportOptions:
     use_default_material: bool = False
     recalculate_normals: bool = False
     preserve_vertex_order: bool = False
+    parent_empties_to_bones: bool = False
+    use_bind_pose_armature: bool = False
 
 
 @dataclass
@@ -211,6 +213,8 @@ class BlenderSceneBuilder:
                 is_root=True,
                 instance_stack=(),
             )
+        if self.options.parent_empties_to_bones:
+            self._attach_empties_to_bones()
         self._build_animations()
         return self.result
 
@@ -271,6 +275,7 @@ class BlenderSceneBuilder:
             obj.parent = parent_object
             obj.matrix_local = local
         obj["collada_id"] = node.id
+        obj["collada_node_type"] = node.type
         if node.sid:
             obj["collada_sid"] = node.sid
         for key, value in node.extras.items():
@@ -366,6 +371,42 @@ class BlenderSceneBuilder:
     def _parent_instance_object(obj, node_object):
         obj.parent = node_object
         obj.matrix_local = Matrix.Identity(4)
+
+    def _attach_empties_to_bones(self):
+        for obj in self.result.objects:
+            if (
+                obj.type != "EMPTY"
+                or obj.get("collada_node_type") == "JOINT"
+                or obj.parent is None
+                or obj.parent.type != "EMPTY"
+                or obj.parent.get("collada_node_type") != "JOINT"
+            ):
+                continue
+            identifiers = {
+                obj.parent.get("collada_id", ""),
+                obj.parent.get("collada_sid", ""),
+            } - {""}
+            targets = {
+                (
+                    record["armature"].as_pointer(),
+                    record["bone_name"],
+                ): record
+                for identifier in identifiers
+                for record in self._bone_targets.get(identifier, ())
+            }
+            if len(targets) != 1:
+                self.result.warnings.append(
+                    "AMBIGUOUS_BONE_ATTACHMENT: "
+                    f"Could not uniquely attach {obj.name!r} to joint "
+                    f"{obj.parent.name!r}"
+                )
+                continue
+            target = next(iter(targets.values()))
+            world = obj.matrix_world.copy()
+            obj.parent = target["armature"]
+            obj.parent_type = "BONE"
+            obj.parent_bone = target["bone_name"]
+            obj.matrix_world = world
 
     def _decoded_geometry(self, geometry_id):
         decoded = self._decoded_cache.get(geometry_id)
@@ -1178,15 +1219,17 @@ class BlenderSceneBuilder:
                 )
             }
             bind_world_by_name = {}
-            for name, inverse_bind in inverse_bind_by_name.items():
-                try:
-                    bind_world_by_name[name] = inverse_bind.inverted()
-                except ValueError:
-                    raise ColladaError(
-                        "SINGULAR_INVERSE_BIND",
-                        f"Joint {name!r} has a singular inverse-bind matrix",
-                        controller.id,
-                    )
+            if self.options.use_bind_pose_armature:
+                for name, inverse_bind in inverse_bind_by_name.items():
+                    try:
+                        bind_world_by_name[name] = inverse_bind.inverted()
+                    except ValueError:
+                        raise ColladaError(
+                            "SINGULAR_INVERSE_BIND",
+                            f"Joint {name!r} has a singular inverse-bind matrix",
+                            controller.id,
+                        )
+            matrix_by_record = {}
             for record in included:
                 node = record["node"]
                 raw_candidates = [node.id, node.sid, node.name]
@@ -1209,6 +1252,7 @@ class BlenderSceneBuilder:
                 if raw_name:
                     raw_to_bone[raw_name] = bone.name
                 matrix = bind_world_by_name.get(raw_name, record["world"])
+                matrix_by_record[id(record)] = matrix
                 bone.matrix = matrix
                 bone.tail = bone.head + matrix.to_3x3() @ Vector((0.0, 0.05, 0.0))
                 bone.use_deform = raw_name in skin.joint_names
@@ -1216,6 +1260,33 @@ class BlenderSceneBuilder:
                 parent = record.get("parent")
                 if parent is not None and id(parent) in bone_by_record:
                     bone_by_record[id(record)].parent = bone_by_record[id(parent)]
+            if self.options.use_bind_pose_armature:
+                non_leaf_lengths = []
+                length_by_record = {}
+                for record in included:
+                    bone = bone_by_record[id(record)]
+                    child_distances = [
+                        (bone_by_record[id(child)].head - bone.head).length
+                        for child in included
+                        if child.get("parent") is record
+                        and id(child) in bone_by_record
+                        and (bone_by_record[id(child)].head - bone.head).length
+                        > 1e-6
+                    ]
+                    if child_distances:
+                        length = min(child_distances)
+                        length_by_record[id(record)] = length
+                        non_leaf_lengths.append(length)
+                leaf_length = min(non_leaf_lengths, default=0.05)
+                for record in included:
+                    bone = bone_by_record[id(record)]
+                    matrix = matrix_by_record[id(record)]
+                    direction = matrix.to_3x3() @ Vector((0.0, 1.0, 0.0))
+                    if direction.length <= 1e-9:
+                        direction = Vector((0.0, 1.0, 0.0))
+                    direction.normalize()
+                    length = length_by_record.get(id(record), leaf_length)
+                    bone.tail = bone.head + direction * max(length, 1e-5)
         finally:
             bpy.ops.object.mode_set(mode="OBJECT")
             armature_object.select_set(False)

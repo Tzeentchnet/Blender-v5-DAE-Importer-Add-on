@@ -3,9 +3,11 @@
 from pathlib import Path
 import math
 import sys
+import tempfile
 import unittest
 
 import bpy
+from mathutils import Vector
 
 
 REPOSITORY = Path(__file__).resolve().parents[2]
@@ -13,7 +15,12 @@ if str(REPOSITORY) not in sys.path:
     sys.path.insert(0, str(REPOSITORY))
 
 import simple_collada_importer
+from simple_collada_importer.collada import parse_collada
+from simple_collada_importer.collada.geometry import decode_geometry
+from simple_collada_importer.exporter import export_dae
 from simple_collada_importer.importer import import_dae
+from simple_collada_importer.operators import IMPORT_OT_simple_collada_full
+from simple_collada_importer.preferences import SimpleColladaPreferences
 
 
 FIXTURES = REPOSITORY / "tests" / "fixtures"
@@ -55,7 +62,30 @@ class RegistrationTests(unittest.TestCase):
             self.assertTrue(
                 hasattr(bpy.ops.import_scene, "simple_collada_full")
             )
+            self.assertTrue(hasattr(bpy.ops.export_scene, "simple_collada"))
             self.assertTrue(hasattr(bpy.types, "IO_FH_simple_collada"))
+            preferences_type = SimpleColladaPreferences
+            import_type = IMPORT_OT_simple_collada_full
+            self.assertFalse(
+                preferences_type.__annotations__[
+                    "default_parent_empties_to_bones"
+                ].keywords["default"]
+            )
+            self.assertFalse(
+                preferences_type.__annotations__[
+                    "default_use_bind_pose_armature"
+                ].keywords["default"]
+            )
+            self.assertFalse(
+                import_type.__annotations__[
+                    "parent_empties_to_bones"
+                ].keywords["default"]
+            )
+            self.assertFalse(
+                import_type.__annotations__[
+                    "use_bind_pose_armature"
+                ].keywords["default"]
+            )
             clear_imported_data()
             result = bpy.ops.import_scene.simple_collada_full(
                 "EXEC_DEFAULT",
@@ -69,6 +99,12 @@ class RegistrationTests(unittest.TestCase):
             self.assertEqual(result, {"FINISHED"})
             self.assertIn("scene_semantics", bpy.data.collections)
             self.assertIn("geometry_primitives", bpy.data.collections)
+            with tempfile.TemporaryDirectory() as directory:
+                result = bpy.ops.export_scene.simple_collada(
+                    "EXEC_DEFAULT",
+                    filepath=str(Path(directory) / "operator-export.dae"),
+                )
+                self.assertEqual(result, {"FINISHED"})
         finally:
             simple_collada_importer.unregister()
 
@@ -314,6 +350,262 @@ class ImportTests(unittest.TestCase):
         }
         self.assertIn("sRGB", set(color_spaces.values()))
         self.assertIn("Non-Color", set(color_spaces.values()))
+
+
+class ExportTests(unittest.TestCase):
+    def setUp(self):
+        clear_imported_data()
+        self.temporary_directory = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        clear_imported_data()
+        self.temporary_directory.cleanup()
+
+    def _path(self, name):
+        return str(Path(self.temporary_directory.name) / name)
+
+    @staticmethod
+    def _new_mesh_object(name):
+        mesh = bpy.data.meshes.new(f"{name}Mesh")
+        mesh.from_pydata(
+            [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)],
+            [],
+            [(0, 1, 2)],
+        )
+        mesh.update()
+        obj = bpy.data.objects.new(name, mesh)
+        bpy.context.scene.collection.objects.link(obj)
+        return obj
+
+    def test_geometry_material_camera_and_light_round_trip(self):
+        root = bpy.data.objects.new("ExportRoot", None)
+        bpy.context.scene.collection.objects.link(root)
+        root.location = (2.0, 3.0, 4.0)
+        mesh_object = self._new_mesh_object("ExportMesh")
+        mesh_object.parent = root
+        mesh_object.location = (1.0, 0.0, 0.0)
+        uv_layer = mesh_object.data.uv_layers.new(name="UVMap")
+        for index, value in enumerate(((0.0, 0.0), (1.0, 0.0), (0.0, 1.0))):
+            uv_layer.data[index].uv = value
+        color = mesh_object.data.color_attributes.new(
+            name="Color",
+            type="FLOAT_COLOR",
+            domain="CORNER",
+        )
+        for item in color.data:
+            item.color = (0.25, 0.5, 0.75, 1.0)
+        material = bpy.data.materials.new("ExportMaterial")
+        material.use_nodes = True
+        bsdf = next(
+            node
+            for node in material.node_tree.nodes
+            if node.type == "BSDF_PRINCIPLED"
+        )
+        bsdf.inputs["Base Color"].default_value = (0.2, 0.4, 0.6, 1.0)
+        bsdf.inputs["Alpha"].default_value = 0.5
+        image = bpy.data.images.load(
+            str(FIXTURES / "textures" / "test_alb.ppm"),
+            check_existing=True,
+        )
+        image_node = material.node_tree.nodes.new("ShaderNodeTexImage")
+        image_node.image = image
+        material.node_tree.links.new(
+            image_node.outputs["Color"],
+            bsdf.inputs["Base Color"],
+        )
+        mesh_object.data.materials.append(material)
+
+        camera_data = bpy.data.cameras.new("ExportCamera")
+        camera_object = bpy.data.objects.new("ExportCamera", camera_data)
+        camera_object.parent = root
+        bpy.context.scene.collection.objects.link(camera_object)
+        light_data = bpy.data.lights.new("ExportLight", type="SPOT")
+        light_data.energy = 250.0
+        light_object = bpy.data.objects.new("ExportLight", light_data)
+        light_object.parent = root
+        bpy.context.scene.collection.objects.link(light_object)
+
+        filepath = self._path("scene.dae")
+        count, error = export_dae(filepath, bpy.context)
+        self.assertIsNone(error)
+        self.assertEqual(count, 4)
+
+        document = parse_collada(filepath)
+        self.assertEqual(len(document.geometries), 1)
+        self.assertEqual(len(document.materials), 1)
+        self.assertEqual(len(document.images), 1)
+        self.assertEqual(len(document.cameras), 1)
+        self.assertEqual(len(document.lights), 1)
+        decoded = decode_geometry(next(iter(document.geometries.values())))
+        self.assertEqual(len(decoded.triangles), 1)
+        self.assertIn(("TEXCOORD", 0), decoded.corner_attributes)
+        self.assertIn(("COLOR", 0), decoded.corner_attributes)
+
+        clear_imported_data()
+        imported, _armature, error = import_dae(
+            filepath,
+            bpy.context,
+            split_by_material=False,
+            recalculate_normals=False,
+        )
+        self.assertIsNone(error)
+        self.assertEqual(imported, 3)
+        self.assertEqual(
+            {obj.type for obj in bpy.data.objects if obj.type != "EMPTY"},
+            {"MESH", "CAMERA", "LIGHT"},
+        )
+        bpy.context.view_layer.update()
+        imported_mesh = next(obj for obj in bpy.data.objects if obj.type == "MESH")
+        self.assertLess(
+            (imported_mesh.matrix_world.translation - Vector((3.0, 3.0, 4.0))).length,
+            1e-5,
+        )
+        self.assertAlmostEqual(bpy.data.lights["ExportLight"].energy, 250.0)
+        imported_material = bpy.data.materials["ExportMaterial"]
+        imported_bsdf = next(
+            node
+            for node in imported_material.node_tree.nodes
+            if node.type == "BSDF_PRINCIPLED"
+        )
+        self.assertAlmostEqual(imported_bsdf.inputs["Alpha"].default_value, 0.5)
+
+    def test_skin_morph_and_optional_bone_construction_round_trip(self):
+        armature_data = bpy.data.armatures.new("ExportRig")
+        armature = bpy.data.objects.new("ExportRig", armature_data)
+        bpy.context.scene.collection.objects.link(armature)
+        bpy.context.view_layer.objects.active = armature
+        armature.select_set(True)
+        bpy.ops.object.mode_set(mode="EDIT")
+        root_bone = armature_data.edit_bones.new("Root")
+        root_bone.head = (0.0, 0.0, 0.0)
+        root_bone.tail = (0.0, 1.0, 0.0)
+        child_bone = armature_data.edit_bones.new("Child")
+        child_bone.head = (0.0, 1.0, 0.0)
+        child_bone.tail = (0.0, 2.0, 0.0)
+        child_bone.parent = root_bone
+        bpy.ops.object.mode_set(mode="OBJECT")
+        armature.select_set(False)
+
+        attachment = bpy.data.objects.new("BoneSocket", None)
+        bpy.context.scene.collection.objects.link(attachment)
+        attachment.parent = armature
+        attachment.parent_type = "BONE"
+        attachment.parent_bone = "Root"
+        attachment.location = (0.25, 0.5, 0.0)
+
+        mesh_object = self._new_mesh_object("SkinnedMesh")
+        mesh_object.shape_key_add(name="Basis")
+        smile = mesh_object.shape_key_add(name="Smile")
+        smile.data[2].co.z = 1.0
+        smile.value = 0.5
+        group = mesh_object.vertex_groups.new(name="Root")
+        group.add([0, 1, 2], 1.0, "REPLACE")
+        modifier = mesh_object.modifiers.new(name="Armature", type="ARMATURE")
+        modifier.object = armature
+
+        filepath = self._path("rigged.dae")
+        count, error = export_dae(filepath, bpy.context)
+        self.assertIsNone(error)
+        self.assertEqual(count, 3)
+        document = parse_collada(filepath)
+        self.assertEqual(len(document.controllers), 2)
+        self.assertTrue(
+            any(controller.skin is not None for controller in document.controllers.values())
+        )
+        self.assertTrue(
+            any(controller.morph is not None for controller in document.controllers.values())
+        )
+
+        clear_imported_data()
+        imported, armature_default, error = import_dae(
+            filepath,
+            bpy.context,
+            split_by_material=False,
+            recalculate_normals=False,
+        )
+        self.assertIsNone(error)
+        self.assertEqual(imported, 1)
+        self.assertAlmostEqual(
+            armature_default.data.bones["Root"].length,
+            0.05,
+            places=4,
+        )
+        socket = bpy.data.objects["BoneSocket"]
+        self.assertEqual(socket.parent.type, "EMPTY")
+        default_socket_world = socket.matrix_world.copy()
+
+        clear_imported_data()
+        imported, armature_bound, error = import_dae(
+            filepath,
+            bpy.context,
+            split_by_material=False,
+            recalculate_normals=False,
+            parent_empties_to_bones=True,
+            use_bind_pose_armature=True,
+        )
+        self.assertIsNone(error)
+        self.assertEqual(imported, 1)
+        self.assertAlmostEqual(
+            armature_bound.data.bones["Root"].length,
+            1.0,
+            places=4,
+        )
+        socket = bpy.data.objects["BoneSocket"]
+        self.assertIs(socket.parent, armature_bound)
+        self.assertEqual(socket.parent_type, "BONE")
+        self.assertEqual(socket.parent_bone, "Root")
+        self.assertLess(
+            (socket.matrix_world.translation - default_socket_world.translation).length,
+            1e-5,
+        )
+        mesh = next(obj for obj in bpy.data.objects if obj.type == "MESH")
+        self.assertAlmostEqual(
+            mesh.data.shape_keys.key_blocks["Smile"].data[2].co.z,
+            1.0,
+        )
+
+    def test_selected_line_export_supports_every_forward_axis(self):
+        line_mesh = bpy.data.meshes.new("LineMesh")
+        line_mesh.from_pydata(
+            [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0)],
+            [(0, 1)],
+            [],
+        )
+        line_object = bpy.data.objects.new("Line", line_mesh)
+        bpy.context.scene.collection.objects.link(line_object)
+        self._new_mesh_object("NotSelected")
+        line_object.select_set(True)
+        bpy.context.view_layer.objects.active = line_object
+
+        for axis in ("-Y", "Y", "-X", "X", "-Z", "Z"):
+            filepath = self._path(f"line-{axis.replace('-', 'negative')}.dae")
+            count, error = export_dae(
+                filepath,
+                bpy.context,
+                selected_only=True,
+                forward_axis=axis,
+            )
+            self.assertIsNone(error)
+            self.assertEqual(count, 1)
+            document = parse_collada(filepath)
+            self.assertEqual(len(document.geometries), 1)
+            decoded = decode_geometry(next(iter(document.geometries.values())))
+            self.assertEqual(len(decoded.edges), 1)
+            self.assertEqual(len(decoded.triangles), 0)
+
+    def test_export_failure_preserves_existing_destination(self):
+        mesh = bpy.data.meshes.new("PointOnlyMesh")
+        mesh.from_pydata([(0.0, 0.0, 0.0)], [], [])
+        obj = bpy.data.objects.new("PointOnly", mesh)
+        bpy.context.scene.collection.objects.link(obj)
+        filepath = Path(self._path("existing.dae"))
+        filepath.write_text("existing", encoding="utf-8")
+
+        count, error = export_dae(str(filepath), bpy.context)
+
+        self.assertEqual(count, 0)
+        self.assertIn("no faces or loose edges", error)
+        self.assertEqual(filepath.read_text(encoding="utf-8"), "existing")
 
 
 if __name__ == "__main__":

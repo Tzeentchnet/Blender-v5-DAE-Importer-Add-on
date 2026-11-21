@@ -70,6 +70,24 @@ class SimpleColladaPreferences(AddonPreferences):
         default=False,
     )
 
+    default_parent_empties_to_bones: BoolProperty(
+        name="Attach Empties to Bones",
+        description=(
+            "Convert non-joint nodes directly below COLLADA joints to native "
+            "Blender bone parenting"
+        ),
+        default=False,
+    )
+
+    default_use_bind_pose_armature: BoolProperty(
+        name="Construct Armature from Bind Pose",
+        description=(
+            "Build bone orientation and display lengths from inverse bind "
+            "matrices instead of scene joint transforms"
+        ),
+        default=False,
+    )
+
     default_global_scale: FloatProperty(
         name="Scale",
         description="Default uniform scale applied on import",
@@ -95,6 +113,8 @@ class SimpleColladaPreferences(AddonPreferences):
         col.prop(self, "default_use_default_material")
         col.prop(self, "default_recalculate_normals")
         col.prop(self, "default_preserve_vertex_order")
+        col.prop(self, "default_parent_empties_to_bones")
+        col.prop(self, "default_use_bind_pose_armature")
         col.prop(self, "default_global_scale")
         col.prop(self, "default_forward_axis")
         layout.label(

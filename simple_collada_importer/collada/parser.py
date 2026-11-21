@@ -1055,6 +1055,16 @@ class _Parser:
                     light_id,
                 )
             values = self._float_children(kind_element, f"light {light_id}")
+            extras = self._simple_extras(element)
+            intensity = extras.get("BLENDER:intensity")
+            if intensity is not None:
+                try:
+                    values["intensity"] = float(intensity)
+                except ValueError:
+                    self.sink.warn(
+                        "INVALID_LIGHT_INTENSITY",
+                        f"Light {light_id!r} has invalid Blender intensity {intensity!r}",
+                    )
             light = Light(
                 id=light_id,
                 name=element.attrib.get("name", light_id),

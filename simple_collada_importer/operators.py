@@ -14,10 +14,11 @@ from bpy.props import (
     StringProperty,
 )
 from bpy.types import Operator, OperatorFileListElement
-from bpy_extras.io_utils import ImportHelper
+from bpy_extras.io_utils import ExportHelper, ImportHelper
 
 from .collada import parse_collada
 from .collada.errors import ColladaCancelled, ColladaError
+from .exporter import export_dae
 from .importer import build_collada_document, import_dae
 from .preferences import get_prefs
 
@@ -85,6 +86,24 @@ class IMPORT_OT_simple_collada_full(Operator, ImportHelper):
         default=False,
     )
 
+    parent_empties_to_bones: BoolProperty(
+        name="Attach Empties to Bones",
+        description=(
+            "Convert non-joint nodes directly below COLLADA joints to native "
+            "Blender bone parenting"
+        ),
+        default=False,
+    )
+
+    use_bind_pose_armature: BoolProperty(
+        name="Construct Armature from Bind Pose",
+        description=(
+            "Build bone orientation and display lengths from inverse bind "
+            "matrices instead of scene joint transforms"
+        ),
+        default=False,
+    )
+
     global_scale: FloatProperty(
         name="Scale",
         description="Uniform scale applied to imported geometry and transforms",
@@ -123,6 +142,14 @@ class IMPORT_OT_simple_collada_full(Operator, ImportHelper):
                 self.recalculate_normals = prefs.default_recalculate_normals
             if not self.properties.is_property_set("preserve_vertex_order"):
                 self.preserve_vertex_order = prefs.default_preserve_vertex_order
+            if not self.properties.is_property_set("parent_empties_to_bones"):
+                self.parent_empties_to_bones = (
+                    prefs.default_parent_empties_to_bones
+                )
+            if not self.properties.is_property_set("use_bind_pose_armature"):
+                self.use_bind_pose_armature = (
+                    prefs.default_use_bind_pose_armature
+                )
             if not self.properties.is_property_set("global_scale"):
                 self.global_scale = prefs.default_global_scale
             if not self.properties.is_property_set("forward_axis"):
@@ -183,6 +210,8 @@ class IMPORT_OT_simple_collada_full(Operator, ImportHelper):
                     use_default_material=self.use_default_material,
                     recalculate_normals=self.recalculate_normals,
                     preserve_vertex_order=self.preserve_vertex_order,
+                    parent_empties_to_bones=self.parent_empties_to_bones,
+                    use_bind_pose_armature=self.use_bind_pose_armature,
                     target_collection=target_coll,
                     wm=wm if len(paths) == 1 else None,
                     warning_callback=warnings.append,
@@ -292,6 +321,8 @@ class IMPORT_OT_simple_collada_full(Operator, ImportHelper):
                 use_default_material=self.use_default_material,
                 recalculate_normals=self.recalculate_normals,
                 preserve_vertex_order=self.preserve_vertex_order,
+                parent_empties_to_bones=self.parent_empties_to_bones,
+                use_bind_pose_armature=self.use_bind_pose_armature,
                 target_collection=target_collection,
                 cancel=self._cancel_event.is_set,
                 warning_callback=self._modal_warnings.append,
@@ -384,6 +415,89 @@ class IMPORT_OT_simple_collada_full(Operator, ImportHelper):
         layout.prop(self, "use_default_material")
         layout.prop(self, "recalculate_normals")
         layout.prop(self, "preserve_vertex_order")
+        layout.prop(self, "parent_empties_to_bones")
+        layout.prop(self, "use_bind_pose_armature")
+        layout.prop(self, "global_scale")
+        layout.prop(self, "forward_axis")
+
+
+class EXPORT_OT_simple_collada(Operator, ExportHelper):
+    """Export supported Blender scene data to COLLADA 1.4.1."""
+
+    bl_idname = "export_scene.simple_collada"
+    bl_label = "Export Simple COLLADA (.dae)"
+    bl_options = {"REGISTER", "PRESET"}
+    filename_ext = ".dae"
+
+    filter_glob: StringProperty(default="*.dae", options={"HIDDEN"})
+
+    selected_only: BoolProperty(
+        name="Selected Objects",
+        description=(
+            "Export selected supported objects plus required parents and armatures"
+        ),
+        default=False,
+    )
+
+    export_rig: BoolProperty(
+        name="Export Armatures",
+        description="Export armatures, joints, skin controllers, and vertex weights",
+        default=True,
+    )
+
+    export_textures: BoolProperty(
+        name="Reference Textures",
+        description="Write local image paths referenced by exported materials",
+        default=True,
+    )
+
+    global_scale: FloatProperty(
+        name="Scale",
+        description="Uniform scale applied to exported root transforms",
+        default=1.0,
+        min=1e-6,
+        soft_min=0.001,
+        soft_max=1000.0,
+    )
+
+    forward_axis: EnumProperty(
+        name="Forward",
+        description="Axis represented as forward in the exported DAE",
+        items=(
+            ("-Y", "-Y Forward", ""),
+            ("Y", "Y Forward", ""),
+            ("-X", "-X Forward", ""),
+            ("X", "X Forward", ""),
+            ("-Z", "-Z Forward", ""),
+            ("Z", "Z Forward", ""),
+        ),
+        default="-Y",
+    )
+
+    def execute(self, context):
+        count, error = export_dae(
+            self.filepath,
+            context,
+            selected_only=self.selected_only,
+            export_rig=self.export_rig,
+            export_textures=self.export_textures,
+            global_scale=self.global_scale,
+            forward_axis=self.forward_axis,
+        )
+        if error is not None:
+            self.report({"ERROR"}, error)
+            return {"CANCELLED"}
+        self.report(
+            {"INFO"},
+            f"Exported {count} object(s) to {os.path.basename(self.filepath)}",
+        )
+        return {"FINISHED"}
+
+    def draw(self, context):
+        layout = self.layout
+        layout.prop(self, "selected_only")
+        layout.prop(self, "export_rig")
+        layout.prop(self, "export_textures")
         layout.prop(self, "global_scale")
         layout.prop(self, "forward_axis")
 

@@ -87,6 +87,8 @@ def import_dae(
     wm=None,
     cancel=None,
     warning_callback=None,
+    parent_empties_to_bones=False,
+    use_bind_pose_armature=False,
 ):
     """Import one DAE file and retain the legacy tuple return contract.
 
@@ -110,6 +112,8 @@ def import_dae(
         use_default_material=use_default_material,
         recalculate_normals=recalculate_normals,
         preserve_vertex_order=preserve_vertex_order,
+        parent_empties_to_bones=parent_empties_to_bones,
+        use_bind_pose_armature=use_bind_pose_armature,
         target_collection=target_collection,
         wm=wm,
         cancel=cancel,
@@ -132,6 +136,8 @@ def build_collada_document(
     wm=None,
     cancel=None,
     warning_callback=None,
+    parent_empties_to_bones=False,
+    use_bind_pose_armature=False,
 ):
     """Compose an already parsed document on Blender's main thread."""
 
@@ -154,6 +160,8 @@ def build_collada_document(
         use_default_material=use_default_material,
         recalculate_normals=recalculate_normals,
         preserve_vertex_order=preserve_vertex_order,
+        parent_empties_to_bones=parent_empties_to_bones,
+        use_bind_pose_armature=use_bind_pose_armature,
     )
     transaction = ImportTransaction()
     try:
