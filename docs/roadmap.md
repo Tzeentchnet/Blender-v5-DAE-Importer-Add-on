@@ -2,6 +2,13 @@
 
 Last reviewed: 2026-11-21
 
+Status: implemented in extension version 2.0.0.
+
+All phases below are covered by synthetic pure-Python and headless Blender
+tests. The test commands are documented in the repository README. Optional
+local compatibility corpora remain external to the repository so asset
+redistribution rights are not assumed.
+
 This roadmap describes the recommended order for expanding the Simple COLLADA
 Importer beyond its current Blender 5 feature set. The goal is to improve
 interoperability without losing the add-on's lightweight packaging, predictable
@@ -17,9 +24,8 @@ The current release already imports:
 - skin controllers, armatures, inverse-bind matrices, and vertex weights
 - per-file up-axis correction, configurable forward axis, and global scale
 
-The remaining work should be implemented in the order below. Each phase should
-land with fixtures and automated Blender tests before the next phase depends on
-it.
+The work was implemented in the order below. The phase descriptions are
+retained as the acceptance record for the importer architecture and tests.
 
 ## Implementation principles
 
@@ -38,7 +44,7 @@ it.
 7. Reuse permissively licensed algorithms only with their required notices.
    Prefer clean-room implementation when source-file licensing is unclear.
 
-## Phase 0: Regression foundation
+## Phase 0: Regression foundation (complete)
 
 Build the test infrastructure before increasing schema coverage.
 
@@ -70,7 +76,7 @@ Build the test infrastructure before increasing schema coverage.
 - Malformed-input fixtures verify explicit errors or warnings.
 - Existing v1.5.3 behavior has a repeatable baseline.
 
-## Phase 1: Document and scene semantics
+## Phase 1: Document and scene semantics (complete)
 
 Correct document-level behavior before adding more object types.
 
@@ -97,7 +103,7 @@ Correct document-level behavior before adding more object types.
 - Files with multiple visual scenes import only the selected scene.
 - Recursive node references fail safely with a useful diagnostic.
 
-## Phase 2: Geometry and attribute completeness
+## Phase 2: Geometry and attribute completeness (complete)
 
 Expand mesh support after scene/reference handling is reliable.
 
@@ -125,7 +131,7 @@ Expand mesh support after scene/reference handling is reliable.
 - Invalid streams produce actionable diagnostics rather than partially
   corrupted meshes.
 
-## Phase 3: Material fidelity
+## Phase 3: Material fidelity (complete)
 
 Translate COLLADA's classic shading models into predictable Blender Principled
 materials.
@@ -154,7 +160,7 @@ materials.
   distinct.
 - Every texture is connected to the UV layer selected by its binding.
 
-## Phase 4: Animation and armature expansion
+## Phase 4: Animation and armature expansion (complete)
 
 Animation is the largest feature milestone and should build on the tested scene
 and transform model from earlier phases.
@@ -185,7 +191,7 @@ and transform model from earlier phases.
   source tangents within tolerance.
 - Multiple animation clips remain independently selectable.
 
-## Phase 5: Morph controllers and shape keys
+## Phase 5: Morph controllers and shape keys (complete)
 
 ### Deliverables
 
@@ -202,7 +208,7 @@ and transform model from earlier phases.
 - Incompatible topology is reported without leaving partial shape-key data.
 - Morph animation follows imported clip timing.
 
-## Phase 6: Cameras, lights, and scene breadth
+## Phase 6: Cameras, lights, and scene breadth (complete)
 
 ### Deliverables
 
@@ -221,7 +227,7 @@ and transform model from earlier phases.
 - Light type, placement, color, cone angle, and attenuation are preserved as
   closely as Blender permits.
 
-## Phase 7: Scale and performance hardening
+## Phase 7: Scale and performance hardening (complete)
 
 Optimize only after the intermediate representation and feature behavior are
 covered by tests.

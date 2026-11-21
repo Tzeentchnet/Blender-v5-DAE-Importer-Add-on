@@ -1,68 +1,51 @@
 # Simple COLLADA (.dae) Importer — Blender 5 Extension
 
-A lightweight Blender 5 **extension** that restores support for importing `.dae`
-(COLLADA) files after the official importer was removed in Blender 5. It also
-handles textures, polylist geometry, armatures, skin weights, and per-file
-up-axis correction.
+A Blender 5 **extension** that restores broad `.dae` (COLLADA) scene import
+after the official importer was removed in Blender 5. It imports scene
+hierarchies, geometry, classic materials, armatures, animation, morphs,
+cameras, and lights through a tested NumPy-accelerated pipeline.
 
 > **Upstream project:** <https://github.com/RebeccaNod1/Blender-v5-DAE-Importer-Add-on>
-
-## Credits
-
-This extension builds directly on prior community work:
-
-- **[RebeccaNod1](https://github.com/RebeccaNod1)** — the immediate code base this
-  extension is built on
-- **[MilesExilium](https://github.com/MilesExilium)** — extended materials, armature, skin
-  weights, polylist support
-- **[ekztal](https://github.com/ekztal)** — original Blender 5 add-on
-- Original concept by **/u/varyingopinions** on Reddit
-
-Huge thanks to the authors above for the core importer logic. On top of that
-foundation, this fork repackages everything as a proper Blender 5 extension,
-adds drag-and-drop and multi-file import, a status-bar progress indicator,
-configurable scale and forward axis, a correctness fix for skin-weight
-assignment, and NumPy-accelerated parsing and mesh upload — see _Improvements
-over upstream_ below for the full list.
 
 ## Features
 
 - Supports both **COLLADA 1.4.1** and **COLLADA 1.5.0** schemas — namespace is
   detected at parse time so files from any compliant exporter load correctly.
-- Imports COLLADA `.dae` geometry — `<triangles>` **and** `<polylist>` (auto fan-triangulated).
-- Builds Principled BSDF materials with diffuse, normal, alpha/transparent, AO,
-  and specular channels. Specular maps connect to **Specular IOR Level** (or
-  Roughness when the filename looks like a roughness map). Diffuse texture
-  alpha remains disconnected unless a separate transparent/alpha map drives
-  transparency.
-- Resolves scene-level material bindings, including the common case where a
-  primitive material symbol maps to a different COLLADA material id.
-- Supports both **FCOLLADA** and **OpenCOLLADA3dsMax** normal-map conventions.
-- Imports skinned meshes instanced through `<instance_controller>` as well as
-  direct `<instance_geometry>` nodes.
-- Resolves skin joint names across node `id` / `name` / `sid` so bone names and
-  vertex groups stay matched when exporters use different identifiers.
-- Applies the same up-axis / scale / forward correction to armatures as to mesh
-  instances so Y_UP / X_UP rigs stay aligned with geometry.
-- Heuristic "bad diffuse" correction — substitutes the `_alb` variant when an
-  exporter wires an AO/normal/spec map into the diffuse channel.
-- Imports armatures from joint hierarchy + `INV_BIND_MATRIX` (toggleable).
-- Imports skin weights as vertex groups + `Armature` modifier.
-- Per-file `up_axis` correction (Y_UP / Z_UP / X_UP).
-- **Configurable global scale** and **forward-axis** remap on the import operator.
-- **Progress bar** in Blender's status bar — per-instance updates for single
-  files and per-file updates for batched imports (clamped so material splits
-  cannot push the bar past complete).
+- Selects the active `<visual_scene>`, expands `<instance_node>` safely, retains
+  object parenting, and shares mesh data across repeated unmodified instances.
+- Applies COLLADA units, X/Y/Z up-axis conversion, configurable forward axis,
+  and global scale exactly once across scene data.
+- Imports `<triangles>`, `<polylist>`, concave `<polygons>`, `<tristrips>`,
+  `<trifans>`, `<lines>`, and `<linestrips>`. Line primitives become mesh edges.
+- Preserves every declared UV and vertex-color set and honors
+  `<bind_vertex_input>` texture-to-UV mappings.
+- Builds Principled materials from Constant, Lambert, Blinn, and Phong effects,
+  including diffuse, emission, specular, shininess, reflectivity, IOR,
+  transparency/opaque modes, normal or bump data, double-sided settings,
+  texture transforms, and correct color spaces.
+- Keeps AO, roughness, metallic, and filename inference as fallbacks when
+  explicit COLLADA bindings are unavailable.
+- Imports skin controllers with bind-shape and inverse-bind matrices, multiple
+  skeleton scopes, non-deforming hierarchy bones, and arbitrary influence
+  counts.
+- Imports nested object and pose-bone animation with STEP, LINEAR, and BEZIER
+  sampling. COLLADA clips remain separate Blender Actions.
+- Imports normalized and relative morph controllers as shape keys, including
+  initial and animated morph weights.
+- Imports perspective/orthographic cameras and ambient, directional, point, and
+  spot lights.
+- Uses staged `iterparse`, strict accessor/index validation, NumPy bulk paths,
+  cooperative Escape cancellation, and file-atomic rollback.
+- Provides optional **Preserve Vertex Order** source-index metadata.
+- Shows status-bar progress for single and batched files.
 - **Drag-and-drop** `.dae` files from your OS file manager into the 3D viewport.
-- **NumPy-accelerated** parsing and bulk mesh data transfer for fast imports of
-  large meshes.
 - "Assign Textures by Name" helper operator (Object menu) for batch texture wiring.
 
 ## Installation
 
 ### Blender 5.0+ (recommended — extensions panel)
 
-1. Download `simple_collada_importer-1.5.3.zip` (or build it from this repo —
+1. Download `simple_collada_importer-2.0.0.zip` (or build it from this repo —
    see _Building_ below).
 2. In Blender open **Edit → Preferences → Get Extensions → Install from Disk…**
 3. Select the `.zip` file.
@@ -89,6 +72,9 @@ over upstream_ below for the full list.
   Mesh → Normals → Recalculate Outside in edit mode). All polygons are also
   marked smooth. Fixes DAE files with inconsistent face winding that show up
   as dark / flipped patches on the model. On by default.
+- **Preserve Vertex Order** — retain source position indices and write a
+  `collada_source_index` point attribute for shape-transfer and round-trip
+  workflows. Off by default.
 - **Scale** — uniform scale applied to imported geometry and transforms
   (default `1.0`).
 - **Forward** — which DAE axis (after up-axis correction) maps to Blender's
@@ -113,61 +99,24 @@ pick a folder. Materials whose name matches an image file (e.g. material
 `brick_wall` and image `brick_wall.png`) get a fresh Principled BSDF + image
 texture.
 
+## Developer documentation
+
+- [Add-on architecture](docs/architecture.md)
+- [COLLADA/DAE import pipeline](docs/import-pipeline.md)
+
 ## Improvements over upstream
 
-| Area | Upstream | This extension |
-| --- | --- | --- |
-| Add-on format | `bl_info` legacy | Blender 5 extension (`blender_manifest.toml`) |
-| File entry point | File → Import only | File → Import **+** drag-and-drop |
-| Multi-file import | One at a time | Many `.dae` files in a single drop |
-| Float / int parsing | `[float(v) for v in text.split()]` | `numpy.fromstring(..., sep=" ")` |
-| Mesh data transfer | `from_pydata` (Python loop) | `mesh.{vertices,loops,polygons}.foreach_set` |
-| UV / color upload | per-loop Python loop | `foreach_set` from a flat NumPy buffer |
-| Skin weight assign | per-pair `vgroup.add(..., 'ADD')` (sums duplicates by accident) | grouped per-bone `'REPLACE'` (intentional, vectorized) |
-| Fan-triangulation | per-corner Python loop | Vectorized NumPy fan + degenerate-triangle filter |
-| Source array reuse | re-parsed per primitive / per instance | Cached by `<source>` id across the whole import |
-| Validation | None | `mesh.validate()` after build |
+See [Improvements over upstream](docs/improvements-over-upstream.md) for a
+detailed comparison with the original importer.
 
-On meshes with hundreds of thousands of corners these changes typically cut
-import time by an order of magnitude versus the upstream pure-Python path.
+## Changelog
 
-## Changelog (selected)
+See the [Changelog](docs/changelog.md) for release details.
 
-### 1.5.3
+## Testing
 
-Correctness and material fixes included in this release:
-
-- **Shared-offset primitive inputs** — VERTEX / NORMAL / UV inputs that share the
-  same COLLADA offset index are no longer overwritten; co-offset attributes
-  import correctly.
-- **Joint id / name / sid resolution** — skin `Name_array` entries resolve
-  against node `id`, `name`, and `sid`; bones and vertex groups use the same
-  final names so the Armature modifier can bind.
-- **Armature axis / scale correction** — armatures receive the same up-axis,
-  forward-axis, and scale correction matrix as mesh instances.
-- **Specular map wiring** — specular textures link into Principled BSDF
-  Specular IOR Level (or Roughness for roughness-named maps).
-- **Diffuse alpha behavior** — diffuse textures no longer force `CLIP` or
-  connect their alpha output; separate transparent/alpha maps still drive
-  transparency.
-- **Import progress** — single-file progress advances by processed scene
-  instances and is clamped so material splits cannot exceed complete.
-- **AO mix node** — prefers modern `ShaderNodeMix` (RGBA) with a MixRGB fallback.
-
-### 1.5.2
-
-- Scene material bindings, `instance_controller` import, normal/alpha maps,
-  `file://` texture paths, and accessor offset/count support.
-
-## Suggested future improvements
-
-These are documented for contributors; they are **not** implemented yet.
-
-- Use `xml.etree.ElementTree.iterparse` + `clear()` to reduce peak memory on
-  very large `.dae` files.
-- Optional preservation of vertex order for round-trip workflows.
-- Multi-UV layer import when models rely on additional UV channels for normal
-  or light maps.
+See [Testing](docs/testing.md) for the pure-Python, headless Blender, optional
+asset-corpus, and performance benchmark workflows.
 
 ## Building from source
 
@@ -181,13 +130,13 @@ installable zip in `dist/` from a checkout:
 
 ```bash
 # bash
-mkdir -p dist && cd simple_collada_importer && zip -r ../dist/simple_collada_importer-1.5.3.zip . && cd ..
+mkdir -p dist && cd simple_collada_importer && zip -r ../dist/simple_collada_importer-2.0.0.zip . && cd ..
 ```
 
 You can also use Blender's own validator:
 
 ```bash
-blender --command extension validate dist/simple_collada_importer-1.5.3.zip
+blender --command extension validate dist/simple_collada_importer-2.0.0.zip
 ```
 
 ## Notes
@@ -208,12 +157,29 @@ blender --command extension validate dist/simple_collada_importer-1.5.3.zip
 - Diffuse texture alpha remains disconnected by default. Separate
   transparent/alpha maps set blend to BLEND; solid color materials with
   alpha < 1 also use BLEND.
-- Normal maps are connected automatically for the imported UV set. Models that
-  rely on additional UV channels may still need manual shader adjustment.
-- Schema coverage: COLLADA 1.4.1 and 1.5.0. Only `<triangles>` and `<polylist>`
-  primitives are imported — `<polygons>`, `<lines>`, `<linestrips>`, `<tristrips>`,
-  `<trifans>`, and 1.5-only B-rep / NURBS / kinematics / physics elements are
-  ignored.
+- Network URIs are never fetched. Local image/file URIs are resolved relative
+  to the DAE and unresolved references are reported.
+- B-rep/NURBS surfaces, physics, kinematics/formulas, non-`profile_COMMON`
+  effects, export/round-trip guarantees, and ZAE archives remain out of scope.
+
+## Credits
+
+This extension builds directly on prior community work:
+
+- **[RebeccaNod1](https://github.com/RebeccaNod1)** — the immediate code base this
+  extension is built on
+- **[MilesExilium](https://github.com/MilesExilium)** — extended materials, armature, skin
+  weights, polylist support
+- **[ekztal](https://github.com/ekztal)** — original Blender 5 add-on
+- Original concept by **/u/varyingopinions** on Reddit
+
+Huge thanks to the authors above for the core importer logic. On top of that
+foundation, this fork repackages everything as a proper Blender 5 extension,
+adds drag-and-drop and multi-file import, a status-bar progress indicator,
+configurable scale and forward axis, a correctness fix for skin-weight
+assignment, and NumPy-accelerated parsing and mesh upload — see _Improvements
+over upstream_ below for the full list.
+
 ## License
 
 GPL-3.0-or-later — matches Blender's add-on licensing requirements. See
