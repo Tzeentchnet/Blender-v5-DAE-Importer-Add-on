@@ -258,7 +258,7 @@ and real user files justify the maintenance cost:
 - physics scenes
 - kinematics and formulas
 - COLLADA FX profiles other than `profile_COMMON`
-- export or round-trip guarantees
+- animation export and lossless round-trip guarantees
 - ZAE packaging, unless requested by users with representative fixtures
 
 ## Reference implementations

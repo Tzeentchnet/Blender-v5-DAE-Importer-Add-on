@@ -2,7 +2,7 @@
 
 ## Overview
 
-The add-on is divided into two primary layers:
+The import side is divided into two primary layers:
 
 1. A Blender-independent COLLADA layer parses XML, validates references and
    indices, and produces a typed intermediate representation.
@@ -32,6 +32,12 @@ File menu / drag-and-drop / script
 This boundary keeps XML and COLLADA algorithms testable with a normal Python
 interpreter. It also prevents worker threads from touching Blender's API.
 
+Export follows a separate main-thread path because it reads Blender data:
+
+```text
+Blender scene --> export operator --> ColladaExporter --> atomic .dae file
+```
+
 ## Design rules
 
 - **Parsing is Blender-independent.** Modules under
@@ -50,6 +56,8 @@ interpreter. It also prevents worker threads from touching Blender's API.
   document references are structured fatal errors.
 - **Coordinate conversion is centralized.** Unit, up-axis, user scale, and
   forward-axis conversion share one document correction matrix.
+- **Export is destination-atomic.** XML is serialized to a temporary file in
+  the destination directory before replacing the requested DAE.
 
 ## Module map
 
@@ -57,10 +65,11 @@ interpreter. It also prevents worker threads from touching Blender's API.
 | --- | --- |
 | [`__init__.py`](../simple_collada_importer/__init__.py) | Registers Blender classes and menus. Blender imports are lazy so importing the pure COLLADA package outside Blender remains possible. |
 | [`file_handler.py`](../simple_collada_importer/file_handler.py) | Registers `.dae` drag-and-drop with Blender. |
-| [`operators.py`](../simple_collada_importer/operators.py) | Owns the file dialog, import options, multi-file orchestration, progress reporting, worker-thread parsing, modal cancellation, and user-facing reports. |
+| [`operators.py`](../simple_collada_importer/operators.py) | Owns import/export dialogs, import options, multi-file orchestration, progress reporting, worker-thread parsing, modal cancellation, and user-facing reports. |
 | [`preferences.py`](../simple_collada_importer/preferences.py) | Stores default values for the import operator. |
 | [`importer.py`](../simple_collada_importer/importer.py) | Public parse/build facade, legacy tuple result, optional material splitting, and transaction boundary. |
 | [`blender_builder.py`](../simple_collada_importer/blender_builder.py) | Converts a `ColladaDocument` into Blender hierarchy, meshes, materials, armatures, shape keys, cameras, lights, and Actions. |
+| [`exporter.py`](../simple_collada_importer/exporter.py) | Collects Blender hierarchy and writes atomic COLLADA 1.4.1 geometry, materials, controllers, cameras, and lights. |
 | [`collada/model.py`](../simple_collada_importer/collada/model.py) | Dataclasses for the Blender-independent document and decoded data. |
 | [`collada/parser.py`](../simple_collada_importer/collada/parser.py) | Staged XML parsing for COLLADA libraries, scenes, controllers, animation, cameras, and lights. |
 | [`collada/accessors.py`](../simple_collada_importer/collada/accessors.py) | Decodes source arrays and accessor offset/count/stride/parameter layouts. |
@@ -113,6 +122,13 @@ Files are processed independently. Each file receives its own collection when
 more than one file is selected, and a failure in one file does not roll back a
 previously completed file.
 
+### Export
+
+Export is synchronous on Blender's main thread. The exporter collects either
+the scene or selection, adds required parents and armatures, assigns unique
+IDs, writes library records, and then writes the visual scene. The output path
+is replaced only after the complete XML document has serialized successfully.
+
 ## Blender composition
 
 `BlenderSceneBuilder` first indexes the active visual scene for hierarchy and
@@ -150,7 +166,7 @@ before composition. On failure it unlinks and removes newly created objects,
 collections, meshes, armatures, materials, cameras, lights, Actions, images,
 and Worlds. It also restores the scene's original World and background color.
 
-## Extending the importer
+## Extending import or export
 
 For a new COLLADA feature:
 
@@ -167,5 +183,6 @@ For a new COLLADA feature:
    assertion when Blender data is affected.
 
 See [Testing](testing.md) for the available validation workflows and
-[COLLADA/DAE import pipeline](import-pipeline.md) for the detailed runtime
-sequence.
+[COLLADA/DAE import pipeline](import-pipeline.md) for the detailed import
+sequence. See [COLLADA/DAE export pipeline](export-pipeline.md) for Blender
+data collection and XML writing.

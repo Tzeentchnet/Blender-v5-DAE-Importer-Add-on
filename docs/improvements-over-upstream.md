@@ -3,7 +3,8 @@
 | Area | Upstream | This extension |
 | --- | --- | --- |
 | Add-on format | `bl_info` legacy | Blender 5 extension (`blender_manifest.toml`) |
-| File entry point | File → Import only | File → Import **+** drag-and-drop |
+| File entry point | File → Import only | File → Import, File → Export, and drag-and-drop |
+| COLLADA export | None | Tested COLLADA 1.4.1 hierarchy, mesh, material, camera/light, skin, and morph export |
 | Multi-file import | One at a time | Many `.dae` files in a single drop |
 | Float / int parsing | `[float(v) for v in text.split()]` | `numpy.fromstring(..., sep=" ")` |
 | Mesh data transfer | `from_pydata` (Python loop) | `mesh.{vertices,loops,polygons}.foreach_set` |

@@ -1,9 +1,10 @@
-# Simple COLLADA (.dae) Importer — Blender 5 Extension
+# Simple COLLADA (.dae) Importer/Exporter — Blender 5 Extension
 
-A Blender 5 **extension** that restores broad `.dae` (COLLADA) scene import
-after the official importer was removed in Blender 5. It imports scene
-hierarchies, geometry, classic materials, armatures, animation, morphs,
-cameras, and lights through a tested NumPy-accelerated pipeline.
+A Blender 5 **extension** that restores broad `.dae` (COLLADA) scene import and
+export after the official integration was removed in Blender 5. It imports
+scene hierarchies, geometry, classic materials, armatures, animation, morphs,
+cameras, and lights through a tested NumPy-accelerated pipeline, and exports a
+round-trip-oriented COLLADA 1.4.1 scene subset.
 
 > **Upstream project:** <https://github.com/RebeccaNod1/Blender-v5-DAE-Importer-Add-on>
 
@@ -34,6 +35,9 @@ cameras, and lights through a tested NumPy-accelerated pipeline.
   initial and animated morph weights.
 - Imports perspective/orthographic cameras and ambient, directional, point, and
   spot lights.
+- Exports COLLADA 1.4.1 hierarchy, triangles, loose edges, every UV/color
+  layer, Principled materials and local texture references, armatures, skin
+  weights, relative/normalized shape keys, cameras, and lights.
 - Uses staged `iterparse`, strict accessor/index validation, NumPy bulk paths,
   cooperative Escape cancellation, and file-atomic rollback.
 - Provides optional **Preserve Vertex Order** source-index metadata.
@@ -45,16 +49,16 @@ cameras, and lights through a tested NumPy-accelerated pipeline.
 
 ### Blender 5.0+ (recommended — extensions panel)
 
-1. Download `simple_collada_importer-2.0.0.zip` (or build it from this repo —
+1. Download `simple_collada_importer-2.1.0.zip` (or build it from this repo —
    see _Building_ below).
 2. In Blender open **Edit → Preferences → Get Extensions → Install from Disk…**
 3. Select the `.zip` file.
 4. The extension is enabled automatically. You will find it under the **Add-ons**
-   tab as **Simple COLLADA (.dae) Importer**.
+   tab as **Simple COLLADA (.dae) Importer/Exporter**.
 
 ## Usage
 
-### File menu
+### Import
 
 **File → Import → Simple COLLADA (.dae)** — opens a file dialog. The sidebar
 (and F9 redo panel) exposes:
@@ -75,15 +79,34 @@ cameras, and lights through a tested NumPy-accelerated pipeline.
 - **Preserve Vertex Order** — retain source position indices and write a
   `collada_source_index` point attribute for shape-transfer and round-trip
   workflows. Off by default.
+- **Attach Empties to Bones** — convert non-joint nodes directly below a
+  COLLADA joint to native Blender bone parenting. Off by default.
+- **Construct Armature from Bind Pose** — use inverse-bind matrices and
+  child-derived display lengths when creating bones instead of scene joint
+  transforms and fixed display lengths. Off by default.
 - **Scale** — uniform scale applied to imported geometry and transforms
   (default `1.0`).
 - **Forward** — which DAE axis (after up-axis correction) maps to Blender's
   forward (`-Y`). Default `-Y` keeps existing behavior.
 
 The defaults for every option above are also configurable in
-**Edit → Preferences → Add-ons → Simple COLLADA (.dae) Importer**, so your
+**Edit → Preferences → Add-ons → Simple COLLADA (.dae) Importer/Exporter**, so your
 preferred values are pre-selected in both the file dialog and drag-and-drop
 imports.
+
+### Export
+
+**File → Export → Simple COLLADA (.dae)** writes a COLLADA 1.4.1 file. The
+export dialog exposes:
+
+- **Selected Objects** — export the selection plus required parents and
+  armatures instead of the complete scene.
+- **Export Armatures** — include joint hierarchies, skin controllers, and
+  vertex weights.
+- **Reference Textures** — include local image paths used by exported
+  Principled materials.
+- **Scale** — apply a uniform scale to exported root transforms.
+- **Forward** — choose the forward-axis basis written to the DAE.
 
 ### Drag and drop
 
@@ -103,6 +126,7 @@ texture.
 
 - [Add-on architecture](docs/architecture.md)
 - [COLLADA/DAE import pipeline](docs/import-pipeline.md)
+- [COLLADA/DAE export pipeline](docs/export-pipeline.md)
 
 ## Improvements over upstream
 
@@ -120,23 +144,20 @@ asset-corpus, and performance benchmark workflows.
 
 ## Building from source
 
-The extension is a plain folder + `blender_manifest.toml`. To produce an
-installable zip in `dist/` from a checkout:
+The extension is a plain folder + `blender_manifest.toml`. Use Blender's
+extension builder so development files and Python caches are excluded from the
+package:
 
 ```powershell
-# PowerShell (Windows)
-.\build.ps1
+blender --command extension build `
+  --source-dir simple_collada_importer `
+  --output-dir dist
 ```
 
-```bash
-# bash
-mkdir -p dist && cd simple_collada_importer && zip -r ../dist/simple_collada_importer-2.0.0.zip . && cd ..
-```
+Validate the resulting archive with Blender:
 
-You can also use Blender's own validator:
-
-```bash
-blender --command extension validate dist/simple_collada_importer-2.0.0.zip
+```powershell
+blender --command extension validate dist/simple_collada_importer-2.1.0.zip
 ```
 
 ## Notes
@@ -159,8 +180,12 @@ blender --command extension validate dist/simple_collada_importer-2.0.0.zip
   alpha < 1 also use BLEND.
 - Network URIs are never fetched. Local image/file URIs are resolved relative
   to the DAE and unresolved references are reported.
-- B-rep/NURBS surfaces, physics, kinematics/formulas, non-`profile_COMMON`
-  effects, export/round-trip guarantees, and ZAE archives remain out of scope.
+- Export uses the stored Mesh datablock rather than applying arbitrary
+  modifiers. Armature modifiers and shape keys are serialized as COLLADA skin
+  and morph controllers.
+- Animation/Action export, B-rep/NURBS surfaces, physics,
+  kinematics/formulas, non-`profile_COMMON` effects, lossless round-trip
+  guarantees, and ZAE archives remain out of scope.
 
 ## Credits
 
@@ -168,12 +193,14 @@ This extension builds directly on prior community work:
 
 - **[RebeccaNod1](https://github.com/RebeccaNod1)** — the immediate code base this
   extension is built on
+- **[TwistedFlog](https://github.com/TwistedFlog)** — exporter, bone attachment,
+  and bind-pose workflow inspiration
 - **[MilesExilium](https://github.com/MilesExilium)** — extended materials, armature, skin
   weights, polylist support
 - **[ekztal](https://github.com/ekztal)** — original Blender 5 add-on
 - Original concept by **/u/varyingopinions** on Reddit
 
-Huge thanks to the authors above for the core importer logic. On top of that
+Huge thanks to the authors above for the core import/export ideas. On top of that
 foundation, this fork repackages everything as a proper Blender 5 extension,
 adds drag-and-drop and multi-file import, a status-bar progress indicator,
 configurable scale and forward axis, a correctness fix for skin-weight

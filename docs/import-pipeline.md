@@ -209,6 +209,14 @@ For a skin controller, the builder:
 Influences are grouped by joint and assigned intentionally rather than summed
 as accidental duplicate writes.
 
+Two default-off compatibility options alter armature composition:
+
+- **Attach Empties to Bones** converts non-joint nodes directly below a joint
+  to native Blender bone parenting after all armatures are available.
+- **Construct Armature from Bind Pose** uses inverse-bind matrices for bone
+  orientation and derives display lengths from child spacing. Otherwise,
+  scene-joint transforms and fixed display lengths are used.
+
 For a morph controller, the basis geometry becomes the mesh Basis shape. Each
 target geometry becomes a shape key. `NORMALIZED` and `RELATIVE` morph methods
 are represented, and controller weights are available to the animation stage.
@@ -282,9 +290,10 @@ batch remain imported.
 ## Deliberate boundaries
 
 The importer does not currently attempt B-rep/NURBS surfaces, physics,
-kinematics/formulas, non-`profile_COMMON` effects, ZAE archives, external
-COLLADA document references, or export/round-trip guarantees.
+kinematics/formulas, non-`profile_COMMON` effects, ZAE archives, or external
+COLLADA document references. The separate exporter intentionally targets a
+documented scene subset rather than lossless round-trip guarantees.
 
 See the [Roadmap](roadmap.md) for the implemented acceptance criteria and
-[Testing](testing.md) for pure, headless Blender, corpus, and benchmark
-workflows.
+[Export pipeline](export-pipeline.md) for writing DAE files. See
+[Testing](testing.md) for pure, headless Blender, corpus, and benchmark workflows.

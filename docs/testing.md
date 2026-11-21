@@ -20,6 +20,11 @@ python tests\run_blender_tests.py `
   --blender "D:\Blender Foundation\Blender 5.3\blender.exe"
 ```
 
+The suite includes export/import round trips for geometry, UV/color
+attributes, materials and texture references, cameras/lights, loose edges,
+all forward-axis choices, skinning, morphs, native bone attachments, and
+bind-pose armature construction.
+
 ## Optional asset-corpus smoke tests
 
 An uncommitted local asset corpus can be added as an opt-in smoke test. The

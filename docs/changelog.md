@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.1.0
+
+- Added COLLADA 1.4.1 export for scene hierarchy, triangles, loose edges,
+  UV/color layers, Principled materials and texture references, cameras,
+  lights, armatures, skin weights, and shape-key morph controllers.
+- Added selected-object export, armature and texture toggles, global scale, and
+  every forward-axis choice.
+- Added default-off import preferences for native bone parenting of attached
+  Empties and bind-pose-based armature construction.
+- Added Blender 5.2/5.3 export/import round-trip coverage.
+
+## 2.0.1
+
+- Built release archives with Blender's extension command-line tooling so
+  Python caches and development-only files are excluded.
+
 ## 2.0.0
 
 - Added a Blender-independent COLLADA intermediate representation, structured
