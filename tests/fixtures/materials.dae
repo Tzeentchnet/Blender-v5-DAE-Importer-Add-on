@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+  <asset><unit meter="1"/><up_axis>Z_UP</up_axis></asset>
+  <library_images>
+    <image id="albedo"><init_from>textures/test_alb.ppm</init_from></image>
+    <image id="ao"><init_from>textures/test_ao.ppm</init_from></image>
+    <image id="normal"><init_from>textures/test_nrm.ppm</init_from></image>
+    <image id="roughness"><init_from>textures/test_rgh.ppm</init_from></image>
+    <image id="metallic"><init_from>textures/test_metal.ppm</init_from></image>
+  </library_images>
+  <library_effects>
+    <effect id="constant-effect"><profile_COMMON><technique sid="common"><constant><emission><color>0.3 0.1 0.0 1</color></emission><transparent opaque="A_ONE"><color>1 1 1 0.5</color></transparent><transparency><float>0.5</float></transparency></constant></technique></profile_COMMON></effect>
+    <effect id="lambert-effect"><profile_COMMON><technique sid="common"><lambert><diffuse><color>0.2 0.4 0.6 1</color></diffuse><transparent opaque="A_ZERO"><color>1 1 1 0.25</color></transparent><transparency><float>1</float></transparency></lambert></technique></profile_COMMON></effect>
+    <effect id="blinn-effect"><profile_COMMON><technique sid="common"><blinn><diffuse><color>0.7 0.7 0.7 1</color></diffuse><specular><color>0.8 0.8 0.8 1</color></specular><shininess><float>64</float></shininess><index_of_refraction><float>1.45</float></index_of_refraction></blinn></technique></profile_COMMON></effect>
+    <effect id="phong-effect"><profile_COMMON>
+      <newparam sid="alb-surface"><surface type="2D"><init_from>albedo</init_from></surface></newparam><newparam sid="alb-sampler"><sampler2D><source>alb-surface</source><wrap_s>WRAP</wrap_s><wrap_t>WRAP</wrap_t></sampler2D></newparam>
+      <newparam sid="ao-surface"><surface type="2D"><init_from>ao</init_from></surface></newparam><newparam sid="ao-sampler"><sampler2D><source>ao-surface</source></sampler2D></newparam>
+      <newparam sid="normal-surface"><surface type="2D"><init_from>normal</init_from></surface></newparam><newparam sid="normal-sampler"><sampler2D><source>normal-surface</source></sampler2D></newparam>
+      <newparam sid="rgh-surface"><surface type="2D"><init_from>roughness</init_from></surface></newparam><newparam sid="rgh-sampler"><sampler2D><source>rgh-surface</source></sampler2D></newparam>
+      <newparam sid="metal-surface"><surface type="2D"><init_from>metallic</init_from></surface></newparam><newparam sid="metal-sampler"><sampler2D><source>metal-surface</source></sampler2D></newparam>
+      <technique sid="common"><phong>
+        <diffuse><texture texture="alb-sampler" texcoord="UVSET1"><extra><technique profile="MAYA"><offsetU>0.1</offsetU><offsetV>0.2</offsetV><repeatU>2</repeatU><repeatV>3</repeatV><rotateUV>0.25</rotateUV></technique></extra></texture></diffuse>
+        <specular><color>0.2 0.2 0.2 1</color></specular><shininess><float>16</float></shininess>
+      </phong></technique>
+      <extra><technique profile="FCOLLADA"><bump><texture texture="normal-sampler" texcoord="UVSET1"/></bump><texture texture="ao-sampler" texcoord="UVSET1"/><texture texture="rgh-sampler" texcoord="UVSET1"/><texture texture="metal-sampler" texcoord="UVSET1"/><double_sided>1</double_sided></technique></extra>
+    </profile_COMMON></effect>
+  </library_effects>
+  <library_materials>
+    <material id="constant-material"><instance_effect url="#constant-effect"/></material>
+    <material id="lambert-material"><instance_effect url="#lambert-effect"/></material>
+    <material id="blinn-material"><instance_effect url="#blinn-effect"/></material>
+    <material id="phong-material"><instance_effect url="#phong-effect"/></material>
+  </library_materials>
+  <library_geometries>
+    <geometry id="material-geometry"><mesh>
+      <source id="positions"><float_array id="positions-array" count="36">0 0 0 1 0 0 0 1 0 2 0 0 3 0 0 2 1 0 0 2 0 1 2 0 0 3 0 2 2 0 3 2 0 2 3 0</float_array><technique_common><accessor source="#positions-array" count="12" stride="3"><param name="X"/><param name="Y"/><param name="Z"/></accessor></technique_common></source>
+      <source id="uv0"><float_array id="uv0-array" count="24">0 0 1 0 0 1 0 0 1 0 0 1 0 0 1 0 0 1 0 0 1 0 0 1</float_array><technique_common><accessor source="#uv0-array" count="12" stride="2"><param name="S"/><param name="T"/></accessor></technique_common></source>
+      <source id="uv1"><float_array id="uv1-array" count="24">0.1 0.1 0.9 0.1 0.1 0.9 0.1 0.1 0.9 0.1 0.1 0.9 0.1 0.1 0.9 0.1 0.1 0.9 0.1 0.1 0.9 0.1 0.1 0.9</float_array><technique_common><accessor source="#uv1-array" count="12" stride="2"><param name="S"/><param name="T"/></accessor></technique_common></source>
+      <vertices id="vertices"><input semantic="POSITION" source="#positions"/></vertices>
+      <triangles count="1" material="CONST"><input semantic="VERTEX" source="#vertices" offset="0"/><input semantic="TEXCOORD" source="#uv0" offset="1" set="0"/><input semantic="TEXCOORD" source="#uv1" offset="2" set="1"/><p>0 0 0 1 1 1 2 2 2</p></triangles>
+      <triangles count="1" material="LAMBERT"><input semantic="VERTEX" source="#vertices" offset="0"/><input semantic="TEXCOORD" source="#uv0" offset="1" set="0"/><input semantic="TEXCOORD" source="#uv1" offset="2" set="1"/><p>3 3 3 4 4 4 5 5 5</p></triangles>
+      <triangles count="1" material="BLINN"><input semantic="VERTEX" source="#vertices" offset="0"/><input semantic="TEXCOORD" source="#uv0" offset="1" set="0"/><input semantic="TEXCOORD" source="#uv1" offset="2" set="1"/><p>6 6 6 7 7 7 8 8 8</p></triangles>
+      <triangles count="1" material="PHONG"><input semantic="VERTEX" source="#vertices" offset="0"/><input semantic="TEXCOORD" source="#uv0" offset="1" set="0"/><input semantic="TEXCOORD" source="#uv1" offset="2" set="1"/><p>9 9 9 10 10 10 11 11 11</p></triangles>
+    </mesh></geometry>
+  </library_geometries>
+  <library_visual_scenes><visual_scene id="Scene"><node id="materials-node"><instance_geometry url="#material-geometry"><bind_material><technique_common>
+    <instance_material symbol="CONST" target="#constant-material"/>
+    <instance_material symbol="LAMBERT" target="#lambert-material"/>
+    <instance_material symbol="BLINN" target="#blinn-material"/>
+    <instance_material symbol="PHONG" target="#phong-material"><bind_vertex_input semantic="UVSET1" input_semantic="TEXCOORD" input_set="1"/></instance_material>
+  </technique_common></bind_material></instance_geometry></node></visual_scene></library_visual_scenes>
+  <scene><instance_visual_scene url="#Scene"/></scene>
+</COLLADA>

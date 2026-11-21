@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+  <asset><up_axis>Z_UP</up_axis></asset>
+  <library_geometries>
+    <geometry id="bad"><mesh>
+      <source id="positions">
+        <float_array id="array" count="9">0 0 0 1 0 0 0 1 0</float_array>
+        <technique_common><accessor source="#array" count="3" stride="3"/></technique_common>
+      </source>
+      <vertices id="vertices"><input semantic="POSITION" source="#positions"/></vertices>
+      <triangles count="1"><input semantic="VERTEX" source="#vertices"/><p>0 -1 2</p></triangles>
+    </mesh></geometry>
+  </library_geometries>
+  <library_visual_scenes><visual_scene id="Scene"><node id="node"><instance_geometry url="#bad"/></node></visual_scene></library_visual_scenes>
+  <scene><instance_visual_scene url="#Scene"/></scene>
+</COLLADA>

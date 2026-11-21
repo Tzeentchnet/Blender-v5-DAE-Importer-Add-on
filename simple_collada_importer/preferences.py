@@ -61,6 +61,15 @@ class SimpleColladaPreferences(AddonPreferences):
         default=True,
     )
 
+    default_preserve_vertex_order: BoolProperty(
+        name="Preserve Vertex Order",
+        description=(
+            "Keep source position indices and unreferenced vertices unchanged "
+            "for shape-transfer and round-trip workflows"
+        ),
+        default=False,
+    )
+
     default_global_scale: FloatProperty(
         name="Scale",
         description="Default uniform scale applied on import",
@@ -85,6 +94,7 @@ class SimpleColladaPreferences(AddonPreferences):
         col.prop(self, "default_split_by_material")
         col.prop(self, "default_use_default_material")
         col.prop(self, "default_recalculate_normals")
+        col.prop(self, "default_preserve_vertex_order")
         col.prop(self, "default_global_scale")
         col.prop(self, "default_forward_axis")
         layout.label(

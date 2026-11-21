@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<COLLADA xmlns="http://www.collada.org/2008/03/COLLADASchema" version="1.5.0">
+  <asset><unit name="meter" meter="1"/><up_axis>Y_UP</up_axis></asset>
+  <library_visual_scenes><visual_scene id="Scene"><node id="root"/></visual_scene></library_visual_scenes>
+  <scene><instance_visual_scene url="#Scene"/></scene>
+</COLLADA>

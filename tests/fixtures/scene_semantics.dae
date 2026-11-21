@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="utf-8"?>
+<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+  <asset>
+    <unit name="centimeter" meter="0.01"/>
+    <up_axis>X_UP</up_axis>
+  </asset>
+  <library_images>
+    <image id="checker-image"><init_from>checker.png</init_from></image>
+  </library_images>
+  <library_effects>
+    <effect id="checker-effect">
+      <profile_COMMON>
+        <newparam sid="checker-surface">
+          <surface type="2D"><init_from>checker-image</init_from></surface>
+        </newparam>
+        <newparam sid="checker-sampler">
+          <sampler2D>
+            <source>checker-surface</source>
+            <wrap_s>WRAP</wrap_s>
+            <wrap_t>CLAMP</wrap_t>
+          </sampler2D>
+        </newparam>
+        <technique sid="common">
+          <phong>
+            <diffuse><texture texture="checker-sampler" texcoord="UVSET1"/></diffuse>
+            <specular><color>0.2 0.3 0.4 1</color></specular>
+            <shininess><float>32</float></shininess>
+            <transparent opaque="A_ONE"><color>1 1 1 1</color></transparent>
+            <transparency><float>0.75</float></transparency>
+          </phong>
+        </technique>
+        <extra><technique profile="GOOGLEEARTH"><double_sided>1</double_sided></technique></extra>
+      </profile_COMMON>
+    </effect>
+  </library_effects>
+  <library_materials>
+    <material id="checker-material" name="Checker">
+      <instance_effect url="#checker-effect"/>
+    </material>
+  </library_materials>
+  <library_geometries>
+    <geometry id="triangle-geometry" name="Triangle">
+      <mesh>
+        <source id="positions">
+          <float_array id="positions-array" count="9">0 0 0 1 0 0 0 1 0</float_array>
+          <technique_common>
+            <accessor source="#positions-array" count="3" stride="3">
+              <param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/>
+            </accessor>
+          </technique_common>
+        </source>
+        <source id="normals">
+          <float_array id="normals-array" count="3">0 0 1</float_array>
+          <technique_common>
+            <accessor source="#normals-array" count="1" stride="3">
+              <param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/>
+            </accessor>
+          </technique_common>
+        </source>
+        <source id="uv0">
+          <float_array id="uv0-array" count="6">0 0 1 0 0 1</float_array>
+          <technique_common>
+            <accessor source="#uv0-array" count="3" stride="2">
+              <param name="S" type="float"/><param name="T" type="float"/>
+            </accessor>
+          </technique_common>
+        </source>
+        <source id="uv1">
+          <float_array id="uv1-array" count="6">0.1 0.2 0.8 0.2 0.1 0.9</float_array>
+          <technique_common>
+            <accessor source="#uv1-array" count="3" stride="2">
+              <param name="S" type="float"/><param name="T" type="float"/>
+            </accessor>
+          </technique_common>
+        </source>
+        <source id="colors">
+          <float_array id="colors-array" count="12">1 0 0 1 0 1 0 1 0 0 1 1</float_array>
+          <technique_common>
+            <accessor source="#colors-array" count="3" stride="4">
+              <param name="R" type="float"/><param name="G" type="float"/>
+              <param name="B" type="float"/><param name="A" type="float"/>
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="triangle-vertices">
+          <input semantic="POSITION" source="#positions"/>
+        </vertices>
+        <triangles count="1" material="MAT">
+          <input semantic="VERTEX" source="#triangle-vertices" offset="0"/>
+          <input semantic="NORMAL" source="#normals" offset="1"/>
+          <input semantic="TEXCOORD" source="#uv0" offset="2" set="0"/>
+          <input semantic="TEXCOORD" source="#uv1" offset="3" set="1"/>
+          <input semantic="COLOR" source="#colors" offset="4" set="0"/>
+          <p>0 0 0 0 0 1 0 1 1 1 2 0 2 2 2</p>
+        </triangles>
+      </mesh>
+    </geometry>
+  </library_geometries>
+  <library_nodes>
+    <node id="shared-node" name="Shared">
+      <rotate sid="spin">0 0 1 45</rotate>
+      <instance_geometry url="#triangle-geometry">
+        <bind_material>
+          <technique_common>
+            <instance_material symbol="MAT" target="#checker-material">
+              <bind_vertex_input semantic="UVSET1" input_semantic="TEXCOORD" input_set="1"/>
+            </instance_material>
+          </technique_common>
+        </bind_material>
+      </instance_geometry>
+    </node>
+  </library_nodes>
+  <library_visual_scenes>
+    <visual_scene id="UnusedScene"><node id="unused"/></visual_scene>
+    <visual_scene id="SelectedScene">
+      <node id="root" name="Root">
+        <translate sid="location">1 2 3</translate>
+        <scale sid="scale">2 2 2</scale>
+        <instance_node url="#shared-node"/>
+        <node id="repeat-parent" name="Repeat Parent">
+          <translate>4 0 0</translate>
+          <instance_node url="#shared-node"/>
+        </node>
+        <node id="look-node">
+          <lookat sid="aim">0 -5 2 0 0 0 0 0 1</lookat>
+        </node>
+      </node>
+    </visual_scene>
+  </library_visual_scenes>
+  <scene><instance_visual_scene url="#SelectedScene"/></scene>
+</COLLADA>

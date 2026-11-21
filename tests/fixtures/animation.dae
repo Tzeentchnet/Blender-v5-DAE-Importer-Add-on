@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+  <asset><unit meter="1"/><up_axis>Z_UP</up_axis></asset>
+  <library_animations>
+    <animation id="move-animation">
+      <source id="move-input">
+        <float_array id="move-input-array" count="3">0 1 2</float_array>
+        <technique_common><accessor source="#move-input-array" count="3" stride="1"><param name="TIME" type="float"/></accessor></technique_common>
+      </source>
+      <source id="move-output">
+        <float_array id="move-output-array" count="3">0 10 20</float_array>
+        <technique_common><accessor source="#move-output-array" count="3" stride="1"><param name="X" type="float"/></accessor></technique_common>
+      </source>
+      <source id="move-interpolation">
+        <Name_array id="move-interpolation-array" count="3">STEP LINEAR LINEAR</Name_array>
+        <technique_common><accessor source="#move-interpolation-array" count="3" stride="1"><param name="INTERPOLATION" type="name"/></accessor></technique_common>
+      </source>
+      <sampler id="move-sampler">
+        <input semantic="INPUT" source="#move-input"/>
+        <input semantic="OUTPUT" source="#move-output"/>
+        <input semantic="INTERPOLATION" source="#move-interpolation"/>
+      </sampler>
+      <animation id="move-child">
+        <channel source="#move-sampler" target="animation-root/animated-sid/location.X"/>
+      </animation>
+    </animation>
+  </library_animations>
+  <library_animation_clips>
+    <animation_clip id="move-clip" name="Move" start="0" end="2">
+      <instance_animation url="#move-animation"/>
+    </animation_clip>
+    <animation_clip id="move-late-clip" name="Move Late" start="0.5" end="2">
+      <instance_animation url="#move-animation"/>
+    </animation_clip>
+  </library_animation_clips>
+  <library_visual_scenes>
+    <visual_scene id="Scene"><node id="animation-root"><node id="animated-node" sid="animated-sid"><translate sid="location">0 0 0</translate></node></node></visual_scene>
+  </library_visual_scenes>
+  <scene><instance_visual_scene url="#Scene"/></scene>
+</COLLADA>

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+  <asset><unit meter="1"/><up_axis>Z_UP</up_axis></asset>
+  <library_geometries>
+    <geometry id="all-primitives" name="All Primitives">
+      <mesh>
+        <source id="positions">
+          <float_array id="positions-array" count="15">0 0 0 2 0 0 2 2 0 1 1 0 0 2 0</float_array>
+          <technique_common>
+            <accessor source="#positions-array" offset="0" count="5" stride="3">
+              <param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/>
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="vertices"><input semantic="POSITION" source="#positions"/></vertices>
+        <triangles count="1"><input semantic="VERTEX" source="#vertices" offset="0"/><p>0 1 3</p></triangles>
+        <polylist count="1"><input semantic="VERTEX" source="#vertices" offset="0"/><vcount>5</vcount><p>0 1 2 3 4</p></polylist>
+        <polygons count="1"><input semantic="VERTEX" source="#vertices" offset="0"/><p>0 1 2 3 4</p></polygons>
+        <tristrips count="1"><input semantic="VERTEX" source="#vertices" offset="0"/><p>0 1 4 2 3</p></tristrips>
+        <trifans count="1"><input semantic="VERTEX" source="#vertices" offset="0"/><p>3 0 1 2 4</p></trifans>
+        <lines count="2"><input semantic="VERTEX" source="#vertices" offset="0"/><p>0 1 2 4</p></lines>
+        <linestrips count="1"><input semantic="VERTEX" source="#vertices" offset="0"/><p>0 3 2</p></linestrips>
+      </mesh>
+    </geometry>
+  </library_geometries>
+  <library_visual_scenes>
+    <visual_scene id="Scene"><node id="geometry-node"><instance_geometry url="#all-primitives"/></node></visual_scene>
+  </library_visual_scenes>
+  <scene><instance_visual_scene url="#Scene"/></scene>
+</COLLADA>

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+  <asset><up_axis>Z_UP</up_axis></asset>
+  <library_nodes>
+    <node id="A"><instance_node url="#B"/></node>
+    <node id="B"><instance_node url="#A"/></node>
+  </library_nodes>
+  <library_visual_scenes><visual_scene id="Scene"><node id="root"><instance_node url="#A"/></node></visual_scene></library_visual_scenes>
+  <scene><instance_visual_scene url="#Scene"/></scene>
+</COLLADA>

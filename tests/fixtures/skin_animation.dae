@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+  <asset><unit meter="1"/><up_axis>Z_UP</up_axis></asset>
+  <library_geometries>
+    <geometry id="skin-geometry" name="Skinned Triangle"><mesh>
+      <source id="positions">
+        <float_array id="positions-array" count="9">0 0 0 1 0 0 0 1 0</float_array>
+        <technique_common><accessor source="#positions-array" count="3" stride="3"><param name="X"/><param name="Y"/><param name="Z"/></accessor></technique_common>
+      </source>
+      <vertices id="vertices"><input semantic="POSITION" source="#positions"/></vertices>
+      <triangles count="1"><input semantic="VERTEX" source="#vertices"/><p>0 1 2</p></triangles>
+    </mesh></geometry>
+  </library_geometries>
+  <library_controllers>
+    <controller id="skin-controller" name="Skin Controller"><skin source="#skin-geometry">
+      <bind_shape_matrix>1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</bind_shape_matrix>
+      <source id="skin-joints">
+        <Name_array id="skin-joints-array" count="1">joint-sid</Name_array>
+        <technique_common><accessor source="#skin-joints-array" count="1" stride="1"><param name="JOINT"/></accessor></technique_common>
+      </source>
+      <source id="skin-bind-poses">
+        <float_array id="skin-bind-poses-array" count="16">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</float_array>
+        <technique_common><accessor source="#skin-bind-poses-array" count="1" stride="16"><param name="TRANSFORM" type="float4x4"/></accessor></technique_common>
+      </source>
+      <source id="skin-weights">
+        <float_array id="skin-weights-array" count="3">1 0.75 0.5</float_array>
+        <technique_common><accessor source="#skin-weights-array" count="3" stride="1"><param name="WEIGHT"/></accessor></technique_common>
+      </source>
+      <joints>
+        <input semantic="JOINT" source="#skin-joints"/>
+        <input semantic="INV_BIND_MATRIX" source="#skin-bind-poses"/>
+      </joints>
+      <vertex_weights count="3">
+        <input semantic="JOINT" source="#skin-joints" offset="0"/>
+        <input semantic="WEIGHT" source="#skin-weights" offset="1"/>
+        <vcount>1 1 1</vcount>
+        <v>0 0 0 1 0 2</v>
+      </vertex_weights>
+    </skin></controller>
+  </library_controllers>
+  <library_animations>
+    <animation id="joint-animation">
+      <source id="joint-time"><float_array id="joint-time-array" count="2">0 1</float_array><technique_common><accessor source="#joint-time-array" count="2" stride="1"><param name="TIME"/></accessor></technique_common></source>
+      <source id="joint-angle"><float_array id="joint-angle-array" count="2">0 90</float_array><technique_common><accessor source="#joint-angle-array" count="2" stride="1"><param name="ANGLE"/></accessor></technique_common></source>
+      <sampler id="joint-sampler"><input semantic="INPUT" source="#joint-time"/><input semantic="OUTPUT" source="#joint-angle"/></sampler>
+      <channel source="#joint-sampler" target="joint-id/rotateZ.ANGLE"/>
+    </animation>
+  </library_animations>
+  <library_animation_clips><animation_clip id="joint-clip"><instance_animation url="#joint-animation"/></animation_clip></library_animation_clips>
+  <library_visual_scenes>
+    <visual_scene id="Scene">
+      <node id="skeleton-root" name="Skeleton Root">
+        <node id="joint-id" sid="joint-sid" name="Joint Name" type="JOINT">
+          <rotate sid="rotateZ">0 0 1 0</rotate>
+        </node>
+      </node>
+      <node id="mesh-node" name="Mesh Node">
+        <instance_controller url="#skin-controller"><skeleton>#skeleton-root</skeleton></instance_controller>
+      </node>
+    </visual_scene>
+  </library_visual_scenes>
+  <scene><instance_visual_scene url="#Scene"/></scene>
+</COLLADA>

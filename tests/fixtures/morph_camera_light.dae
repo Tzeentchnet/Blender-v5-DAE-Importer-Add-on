@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+  <asset><unit name="centimeter" meter="0.01"/><up_axis>Y_UP</up_axis></asset>
+  <library_geometries>
+    <geometry id="basis" name="Basis"><mesh>
+      <source id="basis-positions"><float_array id="basis-array" count="9">0 0 0 1 0 0 0 1 0</float_array><technique_common><accessor source="#basis-array" count="3" stride="3"><param name="X"/><param name="Y"/><param name="Z"/></accessor></technique_common></source>
+      <vertices id="basis-vertices"><input semantic="POSITION" source="#basis-positions"/></vertices>
+      <triangles count="1"><input semantic="VERTEX" source="#basis-vertices"/><p>0 1 2</p></triangles>
+    </mesh></geometry>
+    <geometry id="target-absolute" name="Raised"><mesh>
+      <source id="absolute-positions"><float_array id="absolute-array" count="9">0 0 0 1 0 0 0 1 1</float_array><technique_common><accessor source="#absolute-array" count="3" stride="3"><param name="X"/><param name="Y"/><param name="Z"/></accessor></technique_common></source>
+      <vertices id="absolute-vertices"><input semantic="POSITION" source="#absolute-positions"/></vertices>
+      <triangles count="1"><input semantic="VERTEX" source="#absolute-vertices"/><p>0 1 2</p></triangles>
+    </mesh></geometry>
+    <geometry id="target-relative" name="Offset"><mesh>
+      <source id="relative-positions"><float_array id="relative-array" count="9">0 0 0 0 0 0 0 0 1</float_array><technique_common><accessor source="#relative-array" count="3" stride="3"><param name="X"/><param name="Y"/><param name="Z"/></accessor></technique_common></source>
+      <vertices id="relative-vertices"><input semantic="POSITION" source="#relative-positions"/></vertices>
+      <triangles count="1"><input semantic="VERTEX" source="#relative-vertices"/><p>0 1 2</p></triangles>
+    </mesh></geometry>
+  </library_geometries>
+  <library_controllers>
+    <controller id="morph-normalized"><morph source="#basis" method="NORMALIZED">
+      <source id="normalized-targets"><IDREF_array id="normalized-targets-array" count="1">target-absolute</IDREF_array><technique_common><accessor source="#normalized-targets-array" count="1" stride="1"><param name="MORPH_TARGET"/></accessor></technique_common></source>
+      <source id="normalized-weights"><float_array id="normalized-weights-array" count="1">0.25</float_array><technique_common><accessor source="#normalized-weights-array" count="1" stride="1"><param name="MORPH_WEIGHT"/></accessor></technique_common></source>
+      <targets><input semantic="MORPH_TARGET" source="#normalized-targets"/><input semantic="MORPH_WEIGHT" source="#normalized-weights"/></targets>
+    </morph></controller>
+    <controller id="morph-relative"><morph source="#basis" method="RELATIVE">
+      <source id="relative-targets"><IDREF_array id="relative-targets-array" count="1">target-relative</IDREF_array><technique_common><accessor source="#relative-targets-array" count="1" stride="1"><param name="MORPH_TARGET"/></accessor></technique_common></source>
+      <source id="relative-weights"><float_array id="relative-weights-array" count="1">0.5</float_array><technique_common><accessor source="#relative-weights-array" count="1" stride="1"><param name="MORPH_WEIGHT"/></accessor></technique_common></source>
+      <targets><input semantic="MORPH_TARGET" source="#relative-targets"/><input semantic="MORPH_WEIGHT" source="#relative-weights"/></targets>
+    </morph></controller>
+  </library_controllers>
+  <library_animations>
+    <animation id="morph-animation">
+      <source id="morph-time"><float_array id="morph-time-array" count="2">0 1</float_array><technique_common><accessor source="#morph-time-array" count="2" stride="1"><param name="TIME"/></accessor></technique_common></source>
+      <source id="morph-output"><float_array id="morph-output-array" count="2">0.25 1</float_array><technique_common><accessor source="#morph-output-array" count="2" stride="1"><param name="VALUE"/></accessor></technique_common></source>
+      <sampler id="morph-sampler"><input semantic="INPUT" source="#morph-time"/><input semantic="OUTPUT" source="#morph-output"/></sampler>
+      <channel source="#morph-sampler" target="morph-normalized/weights(0)"/>
+    </animation>
+  </library_animations>
+  <library_animation_clips><animation_clip id="morph-clip" start="0" end="1"><instance_animation url="#morph-animation"/></animation_clip></library_animation_clips>
+  <library_cameras>
+    <camera id="perspective-camera" name="Perspective"><optics><technique_common><perspective><yfov>60</yfov><aspect_ratio>1.7777778</aspect_ratio><znear>10</znear><zfar>10000</zfar></perspective></technique_common></optics></camera>
+    <camera id="orthographic-camera" name="Orthographic"><optics><technique_common><orthographic><xmag>200</xmag><aspect_ratio>1</aspect_ratio><znear>1</znear><zfar>1000</zfar></orthographic></technique_common></optics></camera>
+  </library_cameras>
+  <library_lights>
+    <light id="ambient-light" name="Ambient"><technique_common><ambient><color>0.1 0.2 0.3</color></ambient></technique_common></light>
+    <light id="sun-light" name="Sun"><technique_common><directional><color>1 0.9 0.8</color></directional></technique_common></light>
+    <light id="point-light" name="Point"><technique_common><point><color>0.2 0.4 1</color><constant_attenuation>1</constant_attenuation><linear_attenuation>0.2</linear_attenuation></point></technique_common></light>
+    <light id="spot-light" name="Spot"><technique_common><spot><color>1 1 1</color><falloff_angle>30</falloff_angle><falloff_exponent>2</falloff_exponent></spot></technique_common></light>
+  </library_lights>
+  <library_visual_scenes>
+    <visual_scene id="Scene">
+      <node id="normalized-node"><instance_controller url="#morph-normalized"/></node>
+      <node id="relative-node"><instance_controller url="#morph-relative"/></node>
+      <node id="perspective-node"><instance_camera url="#perspective-camera"/></node>
+      <node id="orthographic-node"><instance_camera url="#orthographic-camera"/></node>
+      <node id="ambient-node"><instance_light url="#ambient-light"/></node>
+      <node id="sun-node"><instance_light url="#sun-light"/></node>
+      <node id="point-node"><instance_light url="#point-light"/></node>
+      <node id="spot-node"><instance_light url="#spot-light"/></node>
+    </visual_scene>
+  </library_visual_scenes>
+  <scene><instance_visual_scene url="#Scene"/></scene>
+</COLLADA>
