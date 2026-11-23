@@ -30,7 +30,7 @@ File menu / drag-and-drop / script
 ```
 
 This boundary keeps XML and COLLADA algorithms testable with a normal Python
-interpreter. It also prevents worker threads from touching Blender's API.
+interpreter.
 
 Export follows a separate main-thread path because it reads Blender data:
 
@@ -43,9 +43,10 @@ Blender scene --> export operator --> ColladaExporter --> atomic .dae file
 - **Parsing is Blender-independent.** Modules under
   [`simple_collada_importer/collada`](../simple_collada_importer/collada) use
   Python, NumPy, and the standard library, but not `bpy`.
-- **Blender data is created on the main thread.** Interactive imports may parse
-  in a worker, but scene composition always runs in the operator's main-thread
-  modal callback.
+- **No threads.** Parsing and scene composition run synchronously on Blender's
+  main thread. The add-on does not use `threading`, `queue`, or
+  `concurrent.futures`; they can crash Blender. If parallel work is ever
+  needed, it must run in a `subprocess`.
 - **One file is one transaction.** If composition fails or is cancelled, data
   blocks created for that file are removed and pre-existing World state is
   restored.
@@ -65,7 +66,7 @@ Blender scene --> export operator --> ColladaExporter --> atomic .dae file
 | --- | --- |
 | [`__init__.py`](../simple_collada_importer/__init__.py) | Registers Blender classes and menus. Blender imports are lazy so importing the pure COLLADA package outside Blender remains possible. |
 | [`file_handler.py`](../simple_collada_importer/file_handler.py) | Registers `.dae` drag-and-drop with Blender. |
-| [`operators.py`](../simple_collada_importer/operators.py) | Owns import/export dialogs, import options, multi-file orchestration, progress reporting, worker-thread parsing, modal cancellation, and user-facing reports. |
+| [`operators.py`](../simple_collada_importer/operators.py) | Owns import/export dialogs, import options, multi-file orchestration, progress reporting, and user-facing reports. |
 | [`preferences.py`](../simple_collada_importer/preferences.py) | Stores default values for the import operator. |
 | [`importer.py`](../simple_collada_importer/importer.py) | Public parse/build facade, legacy tuple result, optional material splitting, and transaction boundary. |
 | [`blender_builder.py`](../simple_collada_importer/blender_builder.py) | Converts a `ColladaDocument` into Blender hierarchy, meshes, materials, armatures, shape keys, cameras, lights, and Actions. |
@@ -103,18 +104,12 @@ Two smaller result models are created later:
 
 ## Execution modes
 
-### Interactive import
+### Import
 
-The Blender operator submits `parse_collada()` to a single worker thread.
-Blender remains responsive while the XML is parsed. A timer-driven modal
-handler receives the completed `ColladaDocument` and runs composition on the
-main thread. Escape sets a cancellation event used by both stages.
-
-### Headless or scripted import
-
-When Blender runs in background mode, or no window is available, parsing and
-composition run synchronously. This makes command-line behavior deterministic
-and suitable for automated tests.
+The operator parses and composes each file in turn on the main thread, with
+status-bar progress. Interactive, background, and scripted imports all use
+the same path, which keeps behavior deterministic and suitable for automated
+tests.
 
 ### Multi-file import
 
@@ -160,6 +155,10 @@ Cancellation is cooperative:
 - the parser checks the cancellation callback during `iterparse`;
 - the scene builder checks before nodes and instances;
 - multi-file imports stop before starting the next file.
+
+The operator itself runs synchronously and does not pass a cancellation
+callback; the hooks remain for scripted callers of `import_dae()` and
+`build_collada_document()`.
 
 `ImportTransaction` snapshots the relevant Blender data-block collections
 before composition. On failure it unlinks and removes newly created objects,

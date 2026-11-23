@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Removed the background parsing thread from the import operator. Imports now
+  run synchronously on Blender's main thread because `threading` and `queue`
+  can crash Blender. Escape no longer cancels an interactive import.
+
 ## 2.1.0
 
 - Added COLLADA 1.4.1 export for scene hierarchy, triangles, loose edges,

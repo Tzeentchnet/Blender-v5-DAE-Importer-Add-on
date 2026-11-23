@@ -2,8 +2,6 @@
 """Operators for the Simple COLLADA extension."""
 
 import os
-from concurrent.futures import ThreadPoolExecutor
-import threading
 
 import bpy
 from bpy.props import (
@@ -16,10 +14,8 @@ from bpy.props import (
 from bpy.types import Operator, OperatorFileListElement
 from bpy_extras.io_utils import ExportHelper, ImportHelper
 
-from .collada import parse_collada
-from .collada.errors import ColladaCancelled, ColladaError
 from .exporter import export_dae
-from .importer import build_collada_document, import_dae
+from .importer import import_dae
 from .preferences import get_prefs
 
 
@@ -165,9 +161,7 @@ class IMPORT_OT_simple_collada_full(Operator, ImportHelper):
         if not paths:
             self.report({"ERROR"}, "No file given")
             return {"CANCELLED"}
-        if bpy.app.background or context.window is None:
-            return self._execute_synchronously(context, paths)
-        return self._begin_modal_import(context, paths)
+        return self._execute_synchronously(context, paths)
 
     def _selected_paths(self):
         if self.files:
@@ -252,161 +246,6 @@ class IMPORT_OT_simple_collada_full(Operator, ImportHelper):
                 preview += f" | ... and {len(warnings) - 3} more warning(s)"
             self.report({"WARNING"}, preview)
         return {"FINISHED"}
-
-    def _begin_modal_import(self, context, paths):
-        self._modal_paths = paths
-        self._modal_index = 0
-        self._modal_total_imported = 0
-        self._modal_last_armature = None
-        self._modal_errors = []
-        self._modal_warnings = []
-        self._modal_cancelled = False
-        self._cancel_event = threading.Event()
-        self._executor = ThreadPoolExecutor(
-            max_workers=1,
-            thread_name_prefix="collada-parser",
-        )
-        self._future = None
-        wm = context.window_manager
-        wm.progress_begin(0, max(len(paths), 1))
-        self._timer = wm.event_timer_add(0.1, window=context.window)
-        wm.modal_handler_add(self)
-        self._start_next_parse()
-        return {"RUNNING_MODAL"}
-
-    def _start_next_parse(self):
-        path = self._modal_paths[self._modal_index]
-        self._future = self._executor.submit(
-            parse_collada,
-            path,
-            self._cancel_event.is_set,
-        )
-
-    def modal(self, context, event):
-        if event.type == "ESC":
-            self._modal_cancelled = True
-            self._cancel_event.set()
-            if self._future is not None:
-                self._future.cancel()
-            return {"RUNNING_MODAL"}
-        if event.type != "TIMER":
-            return {"PASS_THROUGH"}
-        if self._future is None or not self._future.done():
-            return {"RUNNING_MODAL"}
-        if self._modal_cancelled:
-            return self._finish_modal(context, cancelled=True)
-
-        path = self._modal_paths[self._modal_index]
-        try:
-            document = self._future.result()
-        except (ColladaError, ColladaCancelled, OSError) as exc:
-            self._modal_errors.append(f"{os.path.basename(path)}: {exc}")
-            document = None
-        except Exception as exc:
-            self._modal_errors.append(
-                f"{os.path.basename(path)}: Unexpected parse failure: {exc}"
-            )
-            document = None
-
-        if document is not None:
-            target_collection = self._new_file_collection(context, path)
-            count, armature, error = build_collada_document(
-                document=document,
-                filepath=path,
-                context=context,
-                import_rig=self.import_rig,
-                global_scale=self.global_scale,
-                forward_axis=self.forward_axis,
-                split_by_material=self.split_by_material,
-                use_default_material=self.use_default_material,
-                recalculate_normals=self.recalculate_normals,
-                preserve_vertex_order=self.preserve_vertex_order,
-                parent_empties_to_bones=self.parent_empties_to_bones,
-                use_bind_pose_armature=self.use_bind_pose_armature,
-                target_collection=target_collection,
-                cancel=self._cancel_event.is_set,
-                warning_callback=self._modal_warnings.append,
-            )
-            if error:
-                self._modal_errors.append(f"{os.path.basename(path)}: {error}")
-            self._modal_total_imported += count
-            if armature is not None:
-                self._modal_last_armature = armature
-            self._remove_empty_file_collection(context, target_collection)
-
-        self._modal_index += 1
-        context.window_manager.progress_update(self._modal_index)
-        if self._modal_index >= len(self._modal_paths):
-            return self._finish_modal(context, cancelled=False)
-        self._start_next_parse()
-        return {"RUNNING_MODAL"}
-
-    def _new_file_collection(self, context, path):
-        if len(self._modal_paths) <= 1:
-            return None
-        name = os.path.splitext(os.path.basename(path))[0]
-        collection = bpy.data.collections.new(name)
-        context.scene.collection.children.link(collection)
-        return collection
-
-    @staticmethod
-    def _remove_empty_file_collection(context, collection):
-        if collection is None or collection.objects or collection.children:
-            return
-        if collection.name in context.scene.collection.children:
-            context.scene.collection.children.unlink(collection)
-        bpy.data.collections.remove(collection)
-
-    def _finish_modal(self, context, cancelled):
-        wm = context.window_manager
-        if getattr(self, "_timer", None) is not None:
-            wm.event_timer_remove(self._timer)
-            self._timer = None
-        wm.progress_end()
-        self._cancel_event.set()
-        self._executor.shutdown(wait=False, cancel_futures=True)
-        self._future = None
-        if cancelled:
-            self.report(
-                {"WARNING"},
-                f"Import cancelled after {self._modal_index} completed file(s)",
-            )
-            return {"CANCELLED"}
-        if self._modal_total_imported == 0:
-            message = (
-                "; ".join(self._modal_errors)
-                if self._modal_errors
-                else "No objects imported"
-            )
-            self.report({"ERROR"}, message)
-            return {"CANCELLED"}
-        rig_message = (
-            f" + armature ({self._modal_last_armature.name})"
-            if self._modal_last_armature
-            else ""
-        )
-        file_message = (
-            f" from {len(self._modal_paths)} file(s)"
-            if len(self._modal_paths) > 1
-            else ""
-        )
-        self.report(
-            {"INFO"},
-            f"Imported {self._modal_total_imported} object(s)"
-            f"{rig_message}{file_message}.",
-        )
-        messages = [*self._modal_errors, *self._modal_warnings]
-        if messages:
-            preview = " | ".join(messages[:3])
-            if len(messages) > 3:
-                preview += f" | ... and {len(messages) - 3} more warning(s)"
-            self.report({"WARNING"}, preview)
-        return {"FINISHED"}
-
-    def cancel(self, context):
-        if hasattr(self, "_cancel_event"):
-            self._modal_cancelled = True
-            self._cancel_event.set()
 
     def draw(self, context):
         layout = self.layout

@@ -39,7 +39,8 @@ round-trip-oriented COLLADA 1.4.1 scene subset.
   layer, Principled materials and local texture references, armatures, skin
   weights, relative/normalized shape keys, cameras, and lights.
 - Uses staged `iterparse`, strict accessor/index validation, NumPy bulk paths,
-  cooperative Escape cancellation, and file-atomic rollback.
+  cooperative cancellation hooks for scripted imports, and file-atomic
+  rollback.
 - Provides optional **Preserve Vertex Order** source-index metadata.
 - Shows status-bar progress for single and batched files.
 - **Drag-and-drop** `.dae` files from your OS file manager into the 3D viewport.

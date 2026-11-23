@@ -49,8 +49,8 @@ to the import facade:
 - global scale;
 - source forward axis.
 
-Interactive imports parse in a worker thread. Background imports use the same
-pipeline synchronously.
+Every import runs synchronously on Blender's main thread; the add-on does not
+use threads.
 
 ## 2. Staged XML parsing
 
@@ -278,10 +278,11 @@ armature when present, and an error string when the file failed.
 Build progress is based on geometry, controller, camera, and light instances.
 Multi-file progress advances once per completed file.
 
-Escape during an interactive import sets a shared cancellation event. Parsing
-checks it periodically while consuming XML; composition checks it between
-nodes and instances. Cancellation is treated as a failed transaction for the
-active file.
+`import_dae()` and `build_collada_document()` accept an optional `cancel`
+callback for scripted callers. Parsing checks it periodically while consuming
+XML; composition checks it between nodes and instances. Cancellation is
+treated as a failed transaction for the active file. The import operator runs
+synchronously and does not offer Escape cancellation.
 
 Any fatal parse, validation, composition, or cancellation error rolls back
 data created for that file. Already committed files from an earlier multi-file
