@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.1.1
 
 - Removed the background parsing thread from the import operator. Imports now
   run synchronously on Blender's main thread because `threading` and `queue`

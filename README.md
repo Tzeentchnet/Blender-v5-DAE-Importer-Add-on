@@ -50,7 +50,7 @@ round-trip-oriented COLLADA 1.4.1 scene subset.
 
 ### Blender 5.0+ (recommended — extensions panel)
 
-1. Download `simple_collada_importer-2.1.0.zip` (or build it from this repo —
+1. Download `simple_collada_importer-2.1.1.zip` (or build it from this repo —
    see _Building_ below).
 2. In Blender open **Edit → Preferences → Get Extensions → Install from Disk…**
 3. Select the `.zip` file.
@@ -158,7 +158,7 @@ blender --command extension build `
 Validate the resulting archive with Blender:
 
 ```powershell
-blender --command extension validate dist/simple_collada_importer-2.1.0.zip
+blender --command extension validate dist/simple_collada_importer-2.1.1.zip
 ```
 
 ## Notes

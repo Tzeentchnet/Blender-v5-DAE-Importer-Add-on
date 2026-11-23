@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "simple_collada_importer"
-version = "2.1.0"
+version = "2.1.1"
 name = "Simple COLLADA (.dae) Importer/Exporter"
 tagline = "Import and export COLLADA scenes, materials, rigs, and morphs"
 maintainer = "Tzeentchnet <58480142+Tzeentchnet@users.noreply.github.com>"
